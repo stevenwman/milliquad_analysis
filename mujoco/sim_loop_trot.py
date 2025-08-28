@@ -43,9 +43,8 @@ model.dof_damping[-4:] = 3e-9
 data = mujoco.MjData(model)
 data.qpos[2] = 0.01  # Set initial position of the first joint
 data.qacc[:] = 0  # Initialize accelerations to zero    
-
 timestep = (model.opt.timestep 
-            * 1
+            * 10
             )
 model.opt.enableflags |= 1 << 0  # enable override
 # solreflimit="4e-3 1" solimplimit=".95 .99 1e-3"
@@ -58,7 +57,7 @@ model.opt.o_solimp[1] = 0.99
 model.opt.o_solimp[2] = 1e-3
 
 pwm_freq = 1000
-drive_freq = 1
+drive_freq = 20
 
 points_per_period = pwm_freq // drive_freq
 angles = np.linspace(0, 2 * np.pi, points_per_period, endpoint=False)
@@ -80,77 +79,70 @@ for i in range(4):
     body_frame = R.from_quat(body_quat)
     init_rs.append(deepcopy(body_frame))
 
-with mujoco.viewer.launch_passive(model, data) as viewer:
-  # Record the start time of the first step.
+# with mujoco.viewer.launch_passive(model, data) as viewer:
+viewer = mujoco.viewer.launch_passive(model, data)
+step_start = time.monotonic()
+viewer.cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
+viewer.cam.trackbodyid = 1
+
+
+while viewer.is_running() and data.time < 50:
+    print(data.time)
+    viewer.user_scn.ngeom = 0
+
+    angle = angles[int((data.time * pwm_freq) % points_per_period)]
+    angs.append(angle)
+
+    mag_norths = np.zeros((4, 3))
+    goal_norths = np.zeros((4, 3))
+
+    for i in range(4):
+        body_idx = i + 2
+        body_quat = data.xquat[body_idx]
+        body_pos = data.xpos[body_idx]
+        body_frame = R.from_quat(body_quat, scalar_first=True)
+        arr_len = 0.01
+        body_frame_dir = np.array([0,1,0])
+        world_frame_dir = np.array([0,0,1])
+        base_rot = init_rs[i]
+        magnet_north = body_frame.as_matrix() @  body_frame_dir
+        magnet_north = magnet_north if i in [0,3] else -magnet_north
+        mag_norths[i] = magnet_north
+        to = body_pos + arr_len * magnet_north
+
+        rpy_rot = R.from_euler('y', angle, degrees=False)
+        goal_north = rpy_rot.as_matrix() @ world_frame_dir
+        goal_norths[i] = goal_north
+        to_goal = body_pos + arr_len * goal_north
+
+        add_visual_arrow(viewer.user_scn, body_pos[:3], to, rgba=(0, 1, 0, 1))
+        add_visual_arrow(viewer.user_scn, body_pos[:3], to_goal, radius=0.0005, rgba=(1, 0, 0, 0.5))
+
+        roll, pitch, yaw = body_frame.as_euler('zxy', degrees=False)
+        kp_mag = 5e-6 * 1
+        kv_mag = 1e-8 * 0
+
+        data.xfrc_applied[body_idx,3:] = (kp_mag) * np.cross(magnet_north, goal_north) #-kv_mag * np.dot(magnet_north, goal_north)
+
+    #     if i == 0:
+    #         roll, pitch, yaw = body_frame.as_euler('zxy', degrees=False)
+    #         rolls.append(roll)
+    #         pitches.append(pitch)
+    #         yaws.append(yaw)
+
+    # jnts.append(data.qpos[7])     
+    # print(f"acc: {data.qacc}")
+    # print(f"vel: {data.qvel}")
+
+    print(f"xfrc: {data.xfrc_applied}")
+
+    mujoco.mj_step(model, data)
+    viewer.sync()
+
+    time_until_next_step = timestep - (time.monotonic() - step_start)
+    if time_until_next_step > 0:
+        time.sleep(time_until_next_step)
     step_start = time.monotonic()
-    viewer.cam.type = mujoco.mjtCamera.mjCAMERA_FIXED
-    viewer.cam.fixedcamid = 0
-
-    while viewer.is_running() and data.time < 50:
-        # apply a feedback external force on the main body so the position is about 1 cm in z, based on the current position
-        z_target = 0.01
-        z_current = data.xpos[1, 2]
-        z_vel = data.qvel[2]
-        z_error = z_target - z_current
-        kpz = 0.1
-        kpv = 0.001
-        data.xfrc_applied[1, 2] = kpz * z_error + 9.81 * np.sum(model.body_mass[:]) - kpv * z_vel
-
-        viewer.user_scn.ngeom = 0
-
-        angle = angles[int((data.time * pwm_freq) % points_per_period)]
-        angs.append(angle)
-
-        mag_norths = np.zeros((4, 3))
-        goal_norths = np.zeros((4, 3))
-
-        for i in range(4):
-            body_idx = i + 2
-            body_quat = data.xquat[body_idx]
-            body_pos = data.xpos[body_idx]
-            body_frame = R.from_quat(body_quat, scalar_first=True)
-            arr_len = 0.01
-            body_frame_dir = np.array([0,1,0])
-            world_frame_dir = np.array([0,0,1])
-            base_rot = init_rs[i]
-            magnet_north = body_frame.as_matrix() @  body_frame_dir
-            mag_norths[i] = magnet_north
-            to = body_pos + arr_len * magnet_north
-
-            rpy_rot = R.from_euler('y', angle, degrees=False)
-            goal_north = rpy_rot.as_matrix() @ world_frame_dir
-            goal_norths[i] = goal_north
-            to_goal = body_pos + arr_len * goal_north
-
-            add_visual_arrow(viewer.user_scn, body_pos[:3], to, rgba=(0, 1, 0, 1))
-            add_visual_arrow(viewer.user_scn, body_pos[:3], to_goal, radius=0.0005, rgba=(1, 0, 0, 0.5))
-
-            roll, pitch, yaw = body_frame.as_euler('zxy', degrees=False)
-            kp_mag = 1e-17 * 0
-            # kv_mag = 1e-9
-
-            # data.xfrc_applied[i,:] = - kp_mag * ang_error_abs * error_sign * np.array([0, 0, 0, 0, 1, 0])
-            # data.xfrc_applied[i,3:] = kp_mag * np.cross(magnet_north, goal_north)
-
-        #     if i == 0:
-        #         roll, pitch, yaw = body_frame.as_euler('zxy', degrees=False)
-        #         rolls.append(roll)
-        #         pitches.append(pitch)
-        #         yaws.append(yaw)
-
-        # jnts.append(data.qpos[7])     
-        print(f"acc: {data.qacc}")
-        print(f"vel: {data.qvel}")
-
-
-
-        mujoco.mj_step(model, data)
-        viewer.sync()
-
-        time_until_next_step = timestep - (time.monotonic() - step_start)
-        if time_until_next_step > 0:
-            time.sleep(time_until_next_step)
-        step_start = time.monotonic()
 
 # plt.figure()
 # tot_plots = 5
