@@ -17,28 +17,28 @@
             <geom mass="5.3e-5" type="mesh" pos="0 0 0" quat="1 0 0 0" mesh="body" material="body_material" />
             <!-- Link right_leg -->
             <body name="right_leg" pos="0.00342 -0.00298 -0.00134126" quat="0.707107 0.707107 -0 -0">
-                <joint axis="0 0 1" name="FR" type="hinge" />
+                <joint axis="0 0 1" name="FR" type="hinge" range="-9.4247 9.4247"/>
                 <inertial pos="-0.00010974 -0.000189444 0.000675765" mass="1.4e-05" fullinertia="1e-09 1e-09 1e-09 -1.76192e-12 4.98144e-13 8.59942e-13" />
                 <geom type="mesh" mass="5e-6" pos="0 0 0" quat="1 0 0 0" mesh="right_leg" material="right_leg_material" />
                 <geom type="mesh" mass="9e-6" pos="0 0 0.00074" quat="0.707107 -0.707107 0 0" mesh="magnet" material="magnet_material" />
             </body>
             <!-- Link left_leg -->
             <body name="left_leg" pos="0.00342 0.00298 -0.00134126" quat="0 0 0.707107 0.707107">
-                <joint axis="0 0 1" name="FL" type="hinge" />
+                <joint axis="0 0 1" name="FL" type="hinge" range="-9.4247 9.4247"/>
                 <inertial pos="0.000106817 -0.000182357 0.000672587" mass="1.4e-05" fullinertia="1e-09 1e-09 1e-09 1.72259e-12 -4.89628e-13 8.35884e-13" />
                 <geom type="mesh" mass="5e-6" pos="0 0 0" quat="1 0 0 0" mesh="left_leg" material="left_leg_material" />
                 <geom type="mesh" mass="9e-6" pos="8.67362e-19 4.33681e-19 0.00074" quat="3.83323e-17 -0 0.707107 0.707107" mesh="magnet" material="magnet_material" />
             </body>
             <!-- Link right_leg_2 -->
             <body name="right_leg_2" pos="-0.00342 -0.00298 -0.00134126" quat="0.707107 0.707107 -0 -0">
-                <joint axis="0 0 1" name="BR" type="hinge" />
+                <joint axis="0 0 1" name="BR" type="hinge" range="-9.4247 9.4247"/>
                 <inertial pos="-0.00010974 -0.000189444 0.000675765" mass="1.4e-05" fullinertia="1e-09 1e-09 1e-09 -1.76192e-12 4.98144e-13 8.59942e-13" />
                 <geom type="mesh" mass="9e-6" pos="4.33681e-19 0 0.00074" quat="0.707107 -0.707107 0 0" mesh="magnet" material="magnet_material" />
                 <geom type="mesh" mass="5e-6" pos="0 0 0" quat="1 0 0 0" mesh="right_leg" material="right_leg_material" />
             </body>
             <!-- Link left_leg_2 -->
             <body name="left_leg_2" pos="-0.00342 0.00298 -0.00134126" quat="0 0 0.707107 0.707107">
-                <joint axis="0 0 1" name="BL" type="hinge" />
+                <joint axis="0 0 1" name="BL" type="hinge" range="-9.4247 9.4247"/>
                 <inertial pos="0.000106817 -0.000182357 0.000672587" mass="1.4e-05" fullinertia="1e-09 1e-09 1e-09 1.72259e-12 -4.89628e-13 8.35884e-13" />
                 <geom type="mesh" mass="9e-6" pos="4.33681e-19 4.33681e-19 0.00074" quat="3.83323e-17 -0 0.707107 0.707107" mesh="magnet" material="magnet_material" />
                 <geom type="mesh" mass="5e-6" pos="0 0 0" quat="1 0 0 0" mesh="left_leg" material="left_leg_material" />
@@ -55,5 +55,10 @@
         <material name="magnet_material" rgba="0.615686 0.811765 0.929412 1" />
         <material name="left_leg_material" rgba="0.796078 0.823529 0.937255 1" />
     </asset>
-    <equality />
+    <actuator>
+        <position joint="FR" kp='0.1'/>
+        <position joint="FL" kp='0.1'/>
+        <position joint="BR" kp='0.1'/>
+        <position joint="BL" kp='0.1'/>
+    </actuator>
 </mujoco>

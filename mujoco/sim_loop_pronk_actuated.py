@@ -6,10 +6,10 @@ from scipy.spatial.transform import Rotation as R
 import matplotlib.pyplot as plt
 import matplotlib
 from copy import deepcopy
-import math
+import math 
 matplotlib.use('Agg')  # Use the non-interactive 'Agg' backend
 
-mjcf_path = "one_milli_quad/scene_static.xml"
+mjcf_path = "one_milli_quad/scene_actuated.xml"
 
 
 def add_visual_arrow(scene, from_point, to_point, radius=0.001, rgba=(0, 0, 1, 1)):
@@ -37,35 +37,58 @@ def add_visual_arrow(scene, from_point, to_point, radius=0.001, rgba=(0, 0, 1, 1
                          radius, from_point, to_point)
     scene.ngeom += 1
 
-
+def add_text(data, viewer, input):
+    # create an invisibale geom and add label on it
+    geom = viewer.user_scn.geoms[viewer.user_scn.ngeom]
+    mujoco.mjv_initGeom(
+        geom,
+        type=mujoco.mjtGeom.mjGEOM_LABEL,
+        size=np.array([0.2, 0.2, 0.2]),  # label_size
+        pos=data.qpos[:3] + np.array([0.0, 0.0, 0.01]),  # lebel position, here is 1 meter above the root joint
+        mat=np.eye(3).flatten(),  # label orientation, here is no rotation
+        rgba=np.array([0, 0, 0, 0])  # invisible
+    )
+    geom.label = input  # receive string input only
+    viewer.user_scn.ngeom += 1
 
 model = mujoco.MjModel.from_xml_path(mjcf_path)
-model.opt.timestep = 1./5e3
+model.opt.timestep = 1./2e3
 model.dof_damping[-4:] = 3e-9
 data = mujoco.MjData(model)
-# data.qpos[2] = 0.01  # Set initial position of the first joint
-timestep = (model.opt.timestep 
+data.qpos[2] = 0.01  # Set initial position of the first joint
+data.qacc[:] = 0  # Initialize accelerations to zero    
+
+data.qpos[3:7] = [0, 0, 1, 0]  # Set initial position of the remaining joints
+data.qpos[7:11] = np.pi*np.ones(4)
+timestep = (model.opt.timestep
             * 10
             )
 model.opt.enableflags |= 1 << 0  # enable override
 # solreflimit="4e-3 1" solimplimit=".95 .99 1e-3"
 # model.opt.iterations = 200
-model.opt.o_solref[0] = 4e-3
+# model.opt.o_solref[0] = 4e-3
+model.opt.o_solref[0] = 0.004
 model.opt.o_solref[1] = 1
-# self.model.opt.o_solref[1] = 5
+# model.opt.o_solref[1] = 100
 model.opt.o_solimp[0] = 0.95 
 model.opt.o_solimp[1] = 0.99 
 model.opt.o_solimp[2] = 1e-3
 
+# model.actuator_gainprm[0,0] = 1e1
+# model.actuator_gainprm[1,0] = 1e1
+# model.actuator_gainprm[2,0] = 1e1
+# model.actuator_gainprm[3,0] = 1e1
+
+# import pdb; pdb.set_trace()
+
 pwm_freq = 1000
-drive_freq = 1
+drive_freq = 30
 
 points_per_period = pwm_freq // drive_freq
 angles = np.linspace(0, 2 * np.pi, points_per_period, endpoint=False)
-peak_trq = 2e-7
 
 mujoco.mj_step(model, data)
-# data.qacc[:] = 0  # Initialize accelerations to zero    
+data.qacc[:] = 0  # Initialize accelerations to zero    
 
 rolls = []
 pitches = []
@@ -80,33 +103,18 @@ for i in range(4):
     body_frame = R.from_quat(body_quat)
     init_rs.append(deepcopy(body_frame))
 
+
 # with mujoco.viewer.launch_passive(model, data) as viewer:
 viewer = mujoco.viewer.launch_passive(model, data)
 step_start = time.monotonic()
-viewer.cam.type = mujoco.mjtCamera.mjCAMERA_FIXED
-viewer.cam.fixedcamid = 0
+viewer.cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
+viewer.cam.trackbodyid = 1
+viewer.cam.distance = 0.1
+
 
 while viewer.is_running() and data.time < 50:
-    # print(f"time: {data.time}")
-
-    # viewer.add_marker(
-    #     pos=[0, 0, 0],
-    #     type=mujoco.mjtGeom.mjGEOM_NONE,
-    #     size=[0.1, 0.1, 0.1],
-    #     rgba=[1, 1, 1, 1],
-    #     label="time: {}".format(data.time)
-    # )
-    # apply a feedback external force on the main body so the position is about 1 cm in z, based on the current position
-    z_target = 0.01
-    z_current = data.xpos[1, 2]
-    z_vel = data.qvel[0]
-    z_error = z_target - z_current
-    kpz = 0.1
-    kpv = 0.006
-    data.xfrc_applied[1, 2] = kpz * z_error + 1.1 * 9.81 * np.sum(model.body_mass[:]) - kpv * z_vel
 
     viewer.user_scn.ngeom = 0
-
     angle = angles[int((data.time * pwm_freq) % points_per_period)]
     angs.append(angle)
 
@@ -135,30 +143,21 @@ while viewer.is_running() and data.time < 50:
         add_visual_arrow(viewer.user_scn, body_pos[:3], to_goal, radius=0.0005, rgba=(1, 0, 0, 0.5))
 
         roll, pitch, yaw = body_frame.as_euler('zxy', degrees=False)
-        kp_mag = 5e-6
-        kv_mag = 1e-7 * 0
+        kp_mag = 5e-6 * 0.1 
+        kv_mag = 1e-8 * 0
 
-        # data.xfrc_applied[body_idx,3:] = kp_mag * np.cross(magnet_north, goal_north) - kv_mag * np.dot(magnet_north, goal_north)
-    ctrl_pos = 2*np.pi * drive_freq * math.fmod(data.time, 1/drive_freq)
+    pos = 2 * np.pi * drive_freq * (data.time % (1/drive_freq)) # TODO: decimal moduloS
 
-    # print(f"pos: {pos}")
+        # if data.time > 0:   
+            # data.xfrc_applied[body_idx,3:] = (kp_mag) * np.cross(magnet_north, goal_north) * 1 #-kv_mag * np.dot(magnet_north, goal_north) 
+    
+    # data.ctrl[:] = -pos*np.array([1, -1, 1, -1])
 
-    index_arr = np.array([1, -1, 1, -1])
-
-    # data.ctrl[:] = -ctrl_pos*index_arr
-
-    data.ctrl[0] = -ctrl_pos
-    print(f"qposj0:{data.qpos[1]}")
-
-    print(f"ctrlj0:{data.ctrl[0]}\n")
-    # print(f"act:{np.linalg.norm(data.actuator_force)}")
-
-    if data.qpos[1] - data.ctrl[0] > np.pi:
-        data.qpos[1] += 2*np.pi
-        mujoco.mj_forward(model, data)
-    else:
-        mujoco.mj_step(model, data)
-
+    add_text(data, viewer, 
+             f"""time: {data.time:.2f}s""" 
+             f"""   drive freq: {drive_freq}"""
+             f"""   mag torque: {kp_mag:3g}"""
+             f"""   body vel: {np.linalg.norm(data.qvel[:3]):.2f} m/s""")
     #     if i == 0:
     #         roll, pitch, yaw = body_frame.as_euler('zxy', degrees=False)
     #         rolls.append(roll)
@@ -169,10 +168,12 @@ while viewer.is_running() and data.time < 50:
     # print(f"acc: {data.qacc}")
     # print(f"vel: {data.qvel}")
 
-    # print(f"xfrc: {data.xfrc_applied}")
-    # print(data.ctrl)
+    # print(data.time)
 
-    
+    # print(f"xfrc: {data.xfrc_applied}")
+
+
+    mujoco.mj_step(model, data)
     viewer.sync()
 
     time_until_next_step = timestep - (time.monotonic() - step_start)
