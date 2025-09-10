@@ -37,8 +37,22 @@ def add_visual_arrow(scene, from_point, to_point, radius=0.001, rgba=(0, 0, 1, 1
                          radius, from_point, to_point)
     scene.ngeom += 1
 
+def add_text(data, viewer, input):
+    # create an invisibale geom and add label on it
+    geom = viewer.user_scn.geoms[viewer.user_scn.ngeom]
+    mujoco.mjv_initGeom(
+        geom,
+        type=mujoco.mjtGeom.mjGEOM_LABEL,
+        size=np.array([0.2, 0.2, 0.2]),  # label_size
+        pos=data.qpos[:3] + np.array([0.0, 0.0, 0.01]),  # lebel position, here is 1 meter above the root joint
+        mat=np.eye(3).flatten(),  # label orientation, here is no rotation
+        rgba=np.array([0, 0, 0, 0])  # invisible
+    )
+    geom.label = input  # receive string input only
+    viewer.user_scn.ngeom += 1
+
 model = mujoco.MjModel.from_xml_path(mjcf_path)
-model.opt.timestep = 1./1e3
+model.opt.timestep = 1./2e3
 model.dof_damping[-4:] = 3e-9
 data = mujoco.MjData(model)
 data.qpos[2] = 0.01  # Set initial position of the first joint
@@ -61,7 +75,6 @@ drive_freq = 20
 
 points_per_period = pwm_freq // drive_freq
 angles = np.linspace(0, 2 * np.pi, points_per_period, endpoint=False)
-peak_trq = 2e-7
 
 mujoco.mj_step(model, data)
 data.qacc[:] = 0  # Initialize accelerations to zero    
@@ -84,12 +97,13 @@ viewer = mujoco.viewer.launch_passive(model, data)
 step_start = time.monotonic()
 viewer.cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
 viewer.cam.trackbodyid = 1
+viewer.cam.distance = 0.1
 
 
 while viewer.is_running() and data.time < 50:
+
     print(data.time)
     viewer.user_scn.ngeom = 0
-
     angle = angles[int((data.time * pwm_freq) % points_per_period)]
     angs.append(angle)
 
@@ -119,11 +133,16 @@ while viewer.is_running() and data.time < 50:
         add_visual_arrow(viewer.user_scn, body_pos[:3], to_goal, radius=0.0005, rgba=(1, 0, 0, 0.5))
 
         roll, pitch, yaw = body_frame.as_euler('zxy', degrees=False)
-        kp_mag = 5e-6 * 1
+        kp_mag = 5e-6 * 1.5
         kv_mag = 1e-8 * 0
 
-        data.xfrc_applied[body_idx,3:] = (kp_mag) * np.cross(magnet_north, goal_north) #-kv_mag * np.dot(magnet_north, goal_north)
+        if data.time > 0.5:   
+            data.xfrc_applied[body_idx,3:] = (kp_mag) * np.cross(magnet_north, goal_north) #-kv_mag * np.dot(magnet_north, goal_north)
 
+    add_text(data, viewer, 
+             f"""time: {data.time:.2f}s""" 
+             f"""   drive freq: {drive_freq}"""
+             f"""   mag torque: {kp_mag:3g}""")
     #     if i == 0:
     #         roll, pitch, yaw = body_frame.as_euler('zxy', degrees=False)
     #         rolls.append(roll)
@@ -133,6 +152,8 @@ while viewer.is_running() and data.time < 50:
     # jnts.append(data.qpos[7])     
     # print(f"acc: {data.qacc}")
     # print(f"vel: {data.qvel}")
+
+    print(data.time)
 
     print(f"xfrc: {data.xfrc_applied}")
 
