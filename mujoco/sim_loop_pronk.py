@@ -61,7 +61,7 @@ data.qacc[:] = 0  # Initialize accelerations to zero
 data.qpos[3:7] = [0, 0, 1, 0]  # Set initial position of the remaining joints
 data.qpos[7:11] = np.pi*np.ones(4)
 timestep = (model.opt.timestep
-            * 50
+            * 10
             )
 model.opt.enableflags |= 1 << 0  # enable override
 # solreflimit="4e-3 1" solimplimit=".95 .99 1e-3"
@@ -75,7 +75,7 @@ model.opt.o_solimp[1] = 0.99
 model.opt.o_solimp[2] = 1e-3
 
 pwm_freq = 1000
-drive_freq = 10
+drive_freq = 20
 
 points_per_period = pwm_freq // drive_freq
 angles = np.linspace(0, 2 * np.pi, points_per_period, endpoint=False)
@@ -120,7 +120,10 @@ while viewer.is_running() and data.time < 50:
         body_pos = data.xpos[body_idx]
         body_frame = R.from_quat(body_quat, scalar_first=True)
         arr_len = 0.01
-        body_frame_dir = np.array([0,1,0])
+        if i in [0,2]:
+            body_frame_dir = np.array([1,0,0])
+        else:
+            body_frame_dir = np.array([-1,0,0])
         world_frame_dir = np.array([0,0,1])
         base_rot = init_rs[i]
         magnet_north = body_frame.as_matrix() @  body_frame_dir
@@ -136,7 +139,7 @@ while viewer.is_running() and data.time < 50:
         add_visual_arrow(viewer.user_scn, body_pos[:3], to_goal, radius=0.0005, rgba=(1, 0, 0, 0.5))
 
         roll, pitch, yaw = body_frame.as_euler('zxy', degrees=False)
-        kp_mag = 5e-6 * 2
+        kp_mag = 5e-6 * 1.75
         kv_mag = 1e-8 * 0
 
         if data.time > 0:   
