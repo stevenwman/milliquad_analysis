@@ -1,0 +1,17 @@
+,3mm,2mm,1mm,0.25mm
+mass  (g),1.81,0.53,0.1,
+torque from coil low    (Nmm),0.0461,0.0137,0.00171,0.0000267
+torque from coil  high  (Nmm),0.0768,0.0227,0.00284,0.0000444
+force btw magnet ,0.00484,0.00224,0.000435,0.0000375
+dis (mm),18.5,12.2,6.5,1.5
+,,,,
+torque from magnet. (Nmm),0.0298,0.00913,0.000943,0.0000187
+% err low,64.64,66.64,55.15,70.04
+% err high,38.8,40.22,33.2,42.12
+,,,,
+,,,,
+distance between contact point to center of joint (mm),5.12,3.26,1.86,
+body weight   (mN),17.7561,5.1993,0.981,
+,,,,
+min torque /leg   (Nmm) when trotting,0.04546,0.00847,0.00091,
+diff between mag and min ,0.01566,-0.00066,-0.000033,-0.0000187
