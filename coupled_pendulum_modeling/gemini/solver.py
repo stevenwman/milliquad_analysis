@@ -36,8 +36,26 @@ def model(t, y, params):
     
     # Calculate resistive forces
     # Note: The MATLAB code had -Ff * ... * x2.
-    F_res1 = Ff * np.exp(-((x1 - x_offset) * x_range)**2)
-    c_res1 = cf * np.exp(-((x1 - x_offset) * x_range)**2)
+    # F_res1 = Ff * np.exp(-((x1 - x_offset) * x_range)**2)
+
+    theta = x1
+    omega = x2
+
+    f_hat = (-1.180609e-07 \
+    - 2.246739e-06*theta \
+    + 1.775195e-09*omega \
+    + 2.778458e-06*theta**2 \
+    - 1.155633e-08*theta*omega \
+    - 7.178837e-07*theta**3 \
+    + 3.862178e-09*theta**2*omega \
+    - 1.286576e-07*theta**4 \
+    + 8.003569e-09*theta**3*omega \
+    + 6.522879e-08*theta**5 \
+    - 3.200381e-09*theta**4*omega \
+    - 5.847875e-09*theta**6)
+
+    F_res1 = f_hat / 100
+
     F_res2 = 0.0
     
     # Calculate derivatives
@@ -49,14 +67,17 @@ def model(t, y, params):
     # This simplifies to +m_pen * g * l * np.cos(x1)
     # We translate the original MATLAB logic directly.
     
-    x2d = (B * np.sin(wrap_to_pi(wb * t - x1)) +
-           B_inf * np.sin(wrap_to_pi(x3 - x1)) -
-           c1 * x2 -
-           m_pen * g * l * np.cos(np.pi - x1) +
-           - F_res1 - c_res1 * x2) / J
+    # x2d = (B * np.sin(wrap_to_pi(wb * t - x1)) +
+    #        B_inf * np.sin(wrap_to_pi(x3 - x1)) -
+    #        c1 * x2 -
+    #        m_pen * g * l * np.cos(np.pi - x1) +
+    #        - F_res1 - c_res1 * x2) / J
+
+    x2d = (B * np.sin((wb * t - x1)) +
+           F_res1) / J
            
-    x4d = (B * np.sin(wrap_to_pi(wb * t - x3)) +
-           B_inf * np.sin(wrap_to_pi(x1 - x3)) -
+    x4d = (B * np.sin((wb * t - x3)) +
+           B_inf * np.sin((x1 - x3)) -
            c2 * x4 -
            m_pen * g * l * np.cos(np.pi - x3) +
            F_res2) / J
@@ -75,7 +96,7 @@ def run_simulation():
     d = 2e-3
     J = 1/6 * m * d**2
     B = 1e-6
-    wb = 40 * 2 * np.pi
+    wb = 10 * 2 * np.pi
     g = 9.81
     l = 1e-3  # Pendulum length
     B_inf = 1e-7 * 0
@@ -92,7 +113,7 @@ def run_simulation():
     }
 
     # --- Simulation Setup ---
-    t_span = [0, 0.4]
+    t_span = [0, 1]
     y0 = [0, 0, 0, 0]
 
     # --- Run Simulation ---
