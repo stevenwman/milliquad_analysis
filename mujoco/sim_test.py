@@ -3,7 +3,7 @@ import mujoco
 import mujoco.viewer
 
 
-file_path = "one_milli_quad/scene.xml"
+file_path = "mulit_milli_quad/scene.xml"
 
 # Load your model
 model = mujoco.MjModel.from_xml_path(file_path)
