@@ -42,7 +42,7 @@ def add_text(data, viewer, text_input):
     viewer.user_scn.ngeom += 1
 
 
-def run_simulation(params, mjcf_path="mulit_milli_quad/scene_4.xml", sim_duration=10.0, visualize=False, record_path=None, debug=False):
+def run_simulation(params, mjcf_path="mulit_milli_quad/scene_4.xml", sim_duration=10.0, visualize=False, record_path=None, debug=False, ignore_stuck_detection=False):
     """
     Runs a MuJoCo simulation with given parameters and returns the trajectory.
 
@@ -63,6 +63,8 @@ def run_simulation(params, mjcf_path="mulit_milli_quad/scene_4.xml", sim_duratio
             and records a video to this path.
         debug (bool): If True, prints detailed information when a 'stuck'
             condition is detected before raising an error.
+        ignore_stuck_detection (bool): If True, the simulation will not terminate
+            early if the robot is detected as being stuck.
 
     Returns:
         list or None: A list of dictionaries representing the simulation
@@ -216,35 +218,28 @@ def run_simulation(params, mjcf_path="mulit_milli_quad/scene_4.xml", sim_duratio
                         simulation_step(viewer=viewer)
 
                         # --- Stuck Check ---
-                        if data.time > settle_time:
-                            if last_check_pos is None:
-                                # Initialize check state right after settling is done
-                                last_check_pos = data.qpos[:2].copy()
-                                last_check_time = data.time
-                            
-                            if data.time - last_check_time > stuck_check_interval:
-                                current_pos = data.qpos[:2]
-                                distance_moved = np.linalg.norm(current_pos - last_check_pos)
-                                if distance_moved < stuck_threshold:
-                                    print(f"  [Debug] Stuck condition triggered: Moved {distance_moved:.6f}m < {stuck_threshold}m threshold in {stuck_check_interval}s.")
-                                    if debug:
-                                        print("\n--- SIMULATION STUCK ---")
-                                        print(f"Time: {data.time:.4f}s")
-                                        print(f"Position (qpos): {data.qpos[:7]}") # Main body
-                                        print(f"Velocity (qvel): {data.qvel[:6]}") # Main body
-                                        print("Applied forces on main body (xfrc_applied):")
-                                        print(data.xfrc_applied[1]) # Main body is body 1
-                                        print(f"Number of contacts: {data.ncon}")
-                                        for i in range(data.ncon):
-                                            contact = data.contact[i]
-                                            geom1_name = model.geom(contact.geom1).name
-                                            geom2_name = model.geom(contact.geom2).name
-                                            if geom1_name and "quad" in geom1_name or \
-                                               geom2_name and "quad" in geom2_name:
-                                                print(f"  Contact {i}: dist={contact.dist:.4f}, geoms=({geom1_name}, {geom2_name})")
-                                    raise ValueError("Simulation unstable: Robot is stuck.")
-                                last_check_time = data.time
-                                last_check_pos = current_pos
+                        if not ignore_stuck_detection:
+                            if data.time > settle_time:
+                                if last_check_pos is None:
+                                    # Initialize check state right after settling is done
+                                    last_check_pos = data.qpos[:2].copy()
+                                    last_check_time = data.time
+                                
+                                if data.time - last_check_time > stuck_check_interval:
+                                    current_pos = data.qpos[:2]
+                                    distance_moved = np.linalg.norm(current_pos - last_check_pos)
+                                    if distance_moved < stuck_threshold:
+                                        print(f"  [Debug] Stuck condition triggered: Moved {distance_moved:.6f}m < {stuck_threshold}m threshold in {stuck_check_interval}s.")
+                                        if debug:
+                                            print("\n--- SIMULATION STUCK ---")
+                                            print(f"Time: {data.time:.4f}s")
+                                            print(f"Position (qpos): {data.qpos[:7]}") # Main body
+                                            print(f"Velocity (qvel): {data.qvel[:6]}") # Main body
+                                            print("Applied forces on main body (xfrc_applied):")
+                                            print(data.xfrc_applied[1]) # Main body is body 1
+                                        raise ValueError("Simulation unstable: Robot is stuck.")
+                                    last_check_time = data.time
+                                    last_check_pos = current_pos
                         # -------------------
 
                     viewer.sync()
@@ -260,28 +255,28 @@ def run_simulation(params, mjcf_path="mulit_milli_quad/scene_4.xml", sim_duratio
                 simulation_step()
 
                 # --- Stuck Check ---
-                if data.time > settle_time:
-                    if last_check_pos is None:
-                        # Initialize check state right after settling is done
-                        last_check_pos = data.qpos[:2].copy()
-                        last_check_time = data.time
-                    
-                    if data.time - last_check_time > stuck_check_interval:
-                        current_pos = data.qpos[:2]
-                        distance_moved = np.linalg.norm(current_pos - last_check_pos)
-                        if distance_moved < stuck_threshold:
-                            print(f"  [Debug] Stuck condition triggered: Moved {distance_moved:.6f}m < {stuck_threshold}m threshold in {stuck_check_interval}s.")
-                            if debug:
-                                print("\n--- SIMULATION STUCK ---")
-                                print(f"Time: {data.time:.4f}s")
-                                print(f"Position (qpos): {data.qpos[:7]}") # Main body
-                                print(f"Velocity (qvel): {data.qvel[:6]}") # Main body
-                                print("Applied forces on main body (xfrc_applied):")
-                                print(data.xfrc_applied[1]) # Main body is body 1
-
-                            raise ValueError("Simulation unstable: Robot is stuck.")
-                        last_check_time = data.time
-                        last_check_pos = current_pos
+                if not ignore_stuck_detection:
+                    if data.time > settle_time:
+                        if last_check_pos is None:
+                            # Initialize check state right after settling is done
+                            last_check_pos = data.qpos[:2].copy()
+                            last_check_time = data.time
+                        
+                        if data.time - last_check_time > stuck_check_interval:
+                            current_pos = data.qpos[:2]
+                            distance_moved = np.linalg.norm(current_pos - last_check_pos)
+                            if distance_moved < stuck_threshold:
+                                print(f"  [Debug] Stuck condition triggered: Moved {distance_moved:.6f}m < {stuck_threshold}m threshold in {stuck_check_interval}s.")
+                                if debug:
+                                    print("\n--- SIMULATION STUCK ---")
+                                    print(f"Time: {data.time:.4f}s")
+                                    print(f"Position (qpos): {data.qpos[:7]}") # Main body
+                                    print(f"Velocity (qvel): {data.qvel[:6]}") # Main body
+                                    print("Applied forces on main body (xfrc_applied):")
+                                    print(data.xfrc_applied[1]) # Main body is body 1
+                                raise ValueError("Simulation unstable: Robot is stuck.")
+                            last_check_time = data.time
+                            last_check_pos = current_pos
                 # -------------------
 
                 if renderer and data.time >= next_frame_time:
