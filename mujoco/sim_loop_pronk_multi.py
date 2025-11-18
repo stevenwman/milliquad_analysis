@@ -9,7 +9,7 @@ from copy import deepcopy
 import copy
 matplotlib.use('Agg')  # Use the non-interactive 'Agg' backend
 
-mjcf_path = "mulit_milli_quad/scene_1.xml"
+mjcf_path = "mulit_milli_quad/scene_4.xml"
 
 def add_visual_arrow(scene, from_point, to_point, radius=0.001, rgba=(0, 0, 1, 1)):
     """
@@ -44,8 +44,34 @@ def add_text(data, viewer, input):
     viewer.user_scn.ngeom += 1
 
 model = mujoco.MjModel.from_xml_path(mjcf_path)
+
+# --- Friction Modification ---
+# You can modify the friction properties of geoms to observe different behaviors.
+# MuJoCo friction is defined by a 3-element array: [sliding, torsional, rolling].
+# To make the robot slide more, you can decrease the 'sliding' friction component.
+# Below is an example of how to change the friction of the ground plane.
+
+# Print all geom names and their friction values to help identify them
+print("Geoms and their friction values:")
+for i in range(model.ngeom):
+    geom_name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, i)
+    print(f"  ID: {i}, Name: {geom_name}, Friction: {model.geom_friction[i]}")
+
+# Example: Modify ground friction
+ground_geom_name = "floor"  # Change this name if your ground geom is named differently
+ground_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, ground_geom_name)
+
+if ground_id != -1:
+    # Set new friction values here. For more sliding, reduce the first value.
+    new_friction = [1e-5, 1e-5, 1e-5] 
+    model.geom_friction[ground_id] = new_friction
+    print(f"\nModified friction for '{ground_geom_name}' to {model.geom_friction[ground_id]}")
+else:
+    print(f"\nWarning: Geom '{ground_geom_name}' not found. Friction not modified.")
+# -------------------------
+
 model.opt.timestep = 1./2e3
-model.dof_damping[-4:] = 3e-9
+model.dof_damping[-4:] = 7e-10
 data = mujoco.MjData(model)
 data.qpos[2] = 0.002  # Set initial position of the first joint
 data.qacc[:] = 0  # Initialize accelerations to zero    
@@ -159,7 +185,7 @@ while viewer.is_running() and data.time < 50:
     
     viewer.sync()
 
-    time.sleep(0.1)
+    time.sleep(0.01)
     
     time_until_next_step = timestep - (time.monotonic() - step_start)
     if time_until_next_step > 0:
