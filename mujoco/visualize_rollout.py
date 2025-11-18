@@ -5,16 +5,23 @@ import sim_optimizer as sim_optimizer
 def main():
     """
     Reads a specific result from the optimization_results.csv file and
-    launches a visualized MuJoCo simulation with its parameters.
+    launches a visualized MuJoCo simulation with its parameters, with an
+    option to record a video instead.
     """
     parser = argparse.ArgumentParser(
-        description="Visualize a rollout from optimization_results.csv."
+        description="Visualize or record a rollout from optimization_results.csv."
     )
     parser.add_argument(
         "--rank",
         type=int,
         default=1,
         help="The rank of the result to visualize (1 is the best)."
+    )
+    parser.add_argument(
+        "--record",
+        type=str,
+        default=None,
+        help="Optional. Path to save a video recording, e.g., 'rollout.mp4'."
     )
     args = parser.parse_args()
 
@@ -72,13 +79,26 @@ def main():
         print(f"Error: Could not parse parameter values in the CSV file: {e}")
         return
 
-    # --- 4. Run the simulation with visualization ---
-    print("\nLaunching simulation... (Press SPACE to play/pause)")
-    sim_optimizer.run_simulation(
-        sim_params,
-        sim_duration=30.0, # Longer duration for viewing
-        visualize=True
-    )
+
+    filename = "mulit_milli_quad/scene_2.xml"
+    # --- 4. Run the simulation with visualization or recording ---
+    if args.record:
+        print(f"\nRecording rollout to {args.record}...")
+        sim_optimizer.run_simulation(
+            sim_params,
+            sim_duration=10.0,
+            record_path=args.record,
+            ignore_stuck_detection=True
+        )
+    else:
+        print("\nLaunching simulation... (Press SPACE to play/pause)")
+        sim_optimizer.run_simulation(
+            sim_params,
+            mjcf_path=filename,
+            sim_duration=10.0, # Longer duration for viewing
+            visualize=True,
+            ignore_stuck_detection=True
+        )
 
 if __name__ == "__main__":
     main()
