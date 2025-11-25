@@ -96,7 +96,79 @@ def main():
     if args.drive_freq != 30.0:
         print(f"  Using manual drive frequency: {args.drive_freq} Hz")
 
-    filename = "mulit_milli_quad/scene_4.xml"
+    # --- 3.5 Edit the XML Scene to add steps ---
+    import xml.etree.ElementTree as ET
+    
+    # Constants for steps
+    STEP_HEIGHT = 0.0015 # 1 mm
+    STEP_WIDTH = 0.1   # 5 cm
+    STEP_LENGTH = 0.005  # 5 cm
+    NUM_STEPS = 15 
+    START_X = 0.05      # 5 cm
+
+    original_scene_path = "mulit_milli_quad/scene_1.xml"
+    edited_scene_path = original_scene_path.replace(".xml", "_edited.xml")
+    
+    try:
+        tree = ET.parse(original_scene_path)
+        root = tree.getroot()
+        worldbody = root.find('worldbody')
+        
+        if worldbody is None:
+             # If worldbody is not found directly, try to find it recursively or handle error
+             # In standard mujoco xmls, it should be a direct child or close.
+             # Let's assume standard structure based on previous view_file.
+             pass
+
+        if worldbody is not None:
+            for i in range(NUM_STEPS):
+                # Calculate position
+                # x: start + i*length + half_length (center)
+                pos_x = START_X + i * STEP_LENGTH + STEP_LENGTH / 2.0
+                pos_y = 0.0
+                # z: (i+1)*height - half_height (center)
+                # This stacks them like a staircase where the top surface of step i is at (i+1)*height
+                pos_z = (i + 1) * STEP_HEIGHT - STEP_HEIGHT / 2.0
+                
+                # Create geom element
+                # size is half-extents
+                geom = ET.Element('geom')
+                geom.set('name', f'step_{i}')
+                geom.set('type', 'box')
+                geom.set('size', f"{STEP_LENGTH/2.0} {STEP_WIDTH/2.0} {STEP_HEIGHT/2.0}")
+                geom.set('pos', f"{pos_x} {pos_y} {pos_z}")
+                # geom.set('material', 'groundplane') 
+                geom.set('rgba', '0.5 0.5 0.5 1') # Medium grey
+                
+                worldbody.append(geom)
+            
+            tree.write(edited_scene_path)
+            print(f"Created edited scene with {NUM_STEPS} steps at {edited_scene_path}")
+            
+            # Update filename to point to the edited scene (relative to mujoco/ folder where run_simulation expects?)
+            # The run_simulation likely takes path relative to where it's run or absolute.
+            # Original was "mulit_milli_quad/scene_4.xml".
+            # We saved to "mujoco/mulit_milli_quad/scene_edited.xml".
+            # If running from root, "mujoco/..." is correct.
+            # But original code had "mulit_milli_quad/scene_4.xml", implying it might be running from mujoco dir?
+            # Let's check where the user runs it from. Usually root.
+            # Wait, the original code had `filename = "mulit_milli_quad/scene_4.xml"`.
+            # If I write to `mujoco/mulit_milli_quad/scene_edited.xml`, I should pass `mulit_milli_quad/scene_edited.xml` 
+            # IF the CWD is `mujoco`.
+            # However, `visualize_rollout_step.py` is in `mujoco/`.
+            # Let's assume we run from `LEGO-milliquad-mujoco/`.
+            # Then `mujoco/visualize_rollout_step.py` is executed.
+            # The original code `filename = "mulit_milli_quad/scene_4.xml"` suggests `mujoco` is NOT in the path if running from `mujoco` dir?
+            # OR if running from root, maybe `sim_optimizer` handles the path?
+            # Let's look at `sim_optimizer.py` imports or usage if needed.
+            # BUT, to be safe, I will use the same relative path structure as the original `filename`.
+            
+            filename = edited_scene_path
+
+    except Exception as e:
+        print(f"Error editing XML scene: {e}")
+        print("Falling back to original scene.")
+
     # --- 4. Run the simulation with visualization or recording ---
     if args.record:
         print(f"\nRecording rollout to {args.record}...")

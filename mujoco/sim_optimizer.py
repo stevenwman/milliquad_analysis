@@ -96,8 +96,10 @@ def run_simulation(params, mjcf_path="mulit_milli_quad/scene_4.xml", sim_duratio
     data.qpos[3:7] = [0, 0, 1, 0]
     data.qpos[7:11] = np.pi * np.ones(4)
     
+    initial_pos = data.qpos[:3].copy()
+
     init_rs = []
-    drive_freq = 30
+    drive_freq = params.get('drive_freq', 30)
     settle_time = 0.1
     velocities = []
     
@@ -161,10 +163,11 @@ def run_simulation(params, mjcf_path="mulit_milli_quad/scene_4.xml", sim_duratio
 
             if viewer:
                 text_to_display = (
-                    f"time: {data.time:.2f}s "
-                    f"drive freq: {drive_freq} "
-                    f"mag torque: {kp_mag:3g} "
-                    f"body vel: {np.linalg.norm(data.qvel[:3]):.2f} m/s"
+                    f"time: {data.time:.2f}s | "
+                    f"f_drive: {drive_freq} | "
+                    f"t_mag: {kp_mag:3g} | "
+                    f"avg. spd: {np.linalg.norm(data.qpos[:3] - initial_pos) / max(data.time, 1e-8):.2f} m/s | "
+                    f"vel: {np.linalg.norm(data.qvel[:3]):.2f} m/s"
                 )
                 add_text(data, viewer, text_to_display)
 
