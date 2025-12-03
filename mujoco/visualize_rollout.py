@@ -1,6 +1,6 @@
 import csv
 import argparse
-import sim_optimizer as sim_optimizer
+import sim_optimizer as sim_optimizer  # ty:ignore[unresolved-import]
 
 def main():
     """
@@ -96,7 +96,7 @@ def main():
     if args.drive_freq != 30.0:
         print(f"  Using manual drive frequency: {args.drive_freq} Hz")
 
-    filename = "mulit_milli_quad/scene_4.xml"
+    filename = "mulit_milli_quad/scene_1.xml"
     # --- 4. Run the simulation with visualization or recording ---
     if args.record:
         print(f"\nRecording rollout to {args.record}...")
