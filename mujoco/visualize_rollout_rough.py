@@ -96,18 +96,24 @@ def main():
     if args.drive_freq != 30.0:
         print(f"  Using manual drive frequency: {args.drive_freq} Hz")
 
-    # --- 3.5 Edit the XML Scene to add steps ---
+    # --- 3.5 Edit the XML Scene to add rough terrain ---
     import xml.etree.ElementTree as ET
+    import random
+    import numpy as np
     
-    # Constants for steps
-    STEP_HEIGHT = 0.001 # 1 mm
-    STEP_WIDTH = 0.1   # 5 cm
-    STEP_LENGTH = 0.005  # 5 cm
-    NUM_STEPS = 15 
+    # Constants for rough terrain
+    HEIGHT_RANGE = 0.001 # +/- 1 mm
+    SEED = 42
+    SQUARE_SIZE_X = 0.005 # Keep user's 5mm
+    SQUARE_SIZE_Y = 0.005 # Keep user's 5mm
+    NUM_X = 20
+    NUM_Y = 10
     START_X = 0.05      # 5 cm
+    
+    random.seed(SEED)
 
     original_scene_path = "mulit_milli_quad/scene_1.xml"
-    edited_scene_path = original_scene_path.replace(".xml", "_edited.xml")
+    edited_scene_path = original_scene_path.replace(".xml", "_edited_rough.xml")
     
     try:
         tree = ET.parse(original_scene_path)
@@ -115,53 +121,105 @@ def main():
         worldbody = root.find('worldbody')
         
         if worldbody is None:
-             # If worldbody is not found directly, try to find it recursively or handle error
-             # In standard mujoco xmls, it should be a direct child or close.
-             # Let's assume standard structure based on previous view_file.
              pass
 
         if worldbody is not None:
-            for i in range(NUM_STEPS):
-                # Calculate position
-                # x: start + i*length + half_length (center)
-                pos_x = START_X + i * STEP_LENGTH + STEP_LENGTH / 2.0
-                pos_y = 0.0
-                # z: (i+1)*height - half_height (center)
-                # This stacks them like a staircase where the top surface of step i is at (i+1)*height
-                pos_z = (i + 1) * STEP_HEIGHT - STEP_HEIGHT / 2.0
-                
-                # Create geom element
-                # size is half-extents
-                geom = ET.Element('geom')
-                geom.set('name', f'step_{i}')
-                geom.set('type', 'box')
-                geom.set('size', f"{STEP_LENGTH/2.0} {STEP_WIDTH/2.0} {STEP_HEIGHT/2.0}")
-                geom.set('pos', f"{pos_x} {pos_y} {pos_z}")
-                # geom.set('material', 'groundplane') 
-                geom.set('rgba', '0.5 0.5 0.5 1') # Medium grey
-                
-                worldbody.append(geom)
+            # 1. Modify the floor to stop at START_X
+            floor = None
+            for geom in worldbody.findall('geom'):
+                if geom.get('name') == 'floor':
+                    floor = geom
+                    break
+            
+            if floor is not None:
+                floor_len = 1.0
+                floor_center_x = START_X - floor_len
+                floor.set('pos', f"{floor_center_x} 0 0")
+                floor.set('size', f"{floor_len} 1.0 0.05")
+                floor.set('type', 'box')
+                floor.set('pos', f"{floor_center_x} 0 -0.05")
+            
+            # 2. Generate Rough Terrain using HField
+            # Generate heightmap image
+            import imageio
+            
+            # To achieve "blocky" look, we need higher resolution.
+            PIXELS_PER_SQUARE = 20
+            
+            # Generate random heights for each logical square
+            # Uniform random in [-HEIGHT_RANGE, HEIGHT_RANGE]
+            logical_heights = np.zeros((NUM_Y, NUM_X))
+            for ix in range(NUM_X):
+                for iy in range(NUM_Y):
+                    logical_heights[iy, ix] = random.uniform(-HEIGHT_RANGE, HEIGHT_RANGE)
+            
+            # Expand to full resolution image
+            heights = np.kron(logical_heights, np.ones((PIXELS_PER_SQUARE, PIXELS_PER_SQUARE)))
+            
+            # Normalize to 0-255
+            # Range is [-HEIGHT_RANGE, HEIGHT_RANGE]
+            # Map -HEIGHT_RANGE -> 0
+            # Map HEIGHT_RANGE -> 255
+            # Total span = 2 * HEIGHT_RANGE
+            
+            z_min = -HEIGHT_RANGE
+            z_span = 2 * HEIGHT_RANGE
+            
+            normalized_heights = (heights - z_min) / z_span
+            # Clip to 0-1 just in case floating point issues
+            normalized_heights = np.clip(normalized_heights, 0.0, 1.0)
+            
+            # Convert to 0-255 uint8
+            img_data = (normalized_heights * 255).astype(np.uint8)
+            
+            # Save as PNG
+            hfield_filename = "mulit_milli_quad/rough_heightmap.png"
+            imageio.imwrite(hfield_filename, img_data)
+            print(f"Created heightmap image at {hfield_filename}")
+            
+            # Add asset and geom to XML
+            asset = root.find('asset')
+            if asset is None:
+                asset = ET.SubElement(root, 'asset')
+            
+            import os
+            abs_hfield_path = os.path.abspath(hfield_filename)
+            
+            hfield_asset = ET.SubElement(asset, 'hfield')
+            hfield_asset.set('name', 'rough_terrain')
+            hfield_asset.set('file', abs_hfield_path)
+            
+            x_half = (NUM_X * SQUARE_SIZE_X) / 2.0
+            y_half = (NUM_Y * SQUARE_SIZE_Y) / 2.0
+            
+            # size: x_half y_half z_scale z_base
+            # z_scale = z_span (total variation)
+            # z_base = z_min (offset from 0)
+            # Mujoco requires positive size parameters.
+            # We set z_base to a small positive value and compensate with pos_z.
+            z_base_safe = 0.001
+            hfield_asset.set('size', f"{x_half} {y_half} {z_span} {z_base_safe}") 
+            
+            # Geom
+            pos_x = START_X + x_half
+            pos_y = 0.0
+            
+            # We want the surface to range from -HEIGHT_RANGE to HEIGHT_RANGE.
+            # With z_base_safe, the surface ranges from [z_base_safe, z_base_safe + z_span].
+            # i.e. [0.001, 0.001 + 0.002] = [0.001, 0.003].
+            # We want [-0.001, 0.001].
+            # So we need to shift down by 0.002.
+            pos_z = -0.002
+            
+            hfield_geom = ET.SubElement(worldbody, 'geom')
+            hfield_geom.set('name', 'rough_terrain_geom')
+            hfield_geom.set('type', 'hfield')
+            hfield_geom.set('hfield', 'rough_terrain')
+            hfield_geom.set('pos', f"{pos_x} {pos_y} {pos_z}")
+            hfield_geom.set('rgba', '0.5 0.5 0.5 1')
             
             tree.write(edited_scene_path)
-            print(f"Created edited scene with {NUM_STEPS} steps at {edited_scene_path}")
-            
-            # Update filename to point to the edited scene (relative to mujoco/ folder where run_simulation expects?)
-            # The run_simulation likely takes path relative to where it's run or absolute.
-            # Original was "mulit_milli_quad/scene_4.xml".
-            # We saved to "mujoco/mulit_milli_quad/scene_edited.xml".
-            # If running from root, "mujoco/..." is correct.
-            # But original code had "mulit_milli_quad/scene_4.xml", implying it might be running from mujoco dir?
-            # Let's check where the user runs it from. Usually root.
-            # Wait, the original code had `filename = "mulit_milli_quad/scene_4.xml"`.
-            # If I write to `mujoco/mulit_milli_quad/scene_edited.xml`, I should pass `mulit_milli_quad/scene_edited.xml` 
-            # IF the CWD is `mujoco`.
-            # However, `visualize_rollout_step.py` is in `mujoco/`.
-            # Let's assume we run from `LEGO-milliquad-mujoco/`.
-            # Then `mujoco/visualize_rollout_step.py` is executed.
-            # The original code `filename = "mulit_milli_quad/scene_4.xml"` suggests `mujoco` is NOT in the path if running from `mujoco` dir?
-            # OR if running from root, maybe `sim_optimizer` handles the path?
-            # Let's look at `sim_optimizer.py` imports or usage if needed.
-            # BUT, to be safe, I will use the same relative path structure as the original `filename`.
+            print(f"Created rough terrain scene at {edited_scene_path}")
             
             filename = edited_scene_path
 

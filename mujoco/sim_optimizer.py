@@ -136,6 +136,8 @@ def run_simulation(params, mjcf_path="mulit_milli_quad/scene_4.xml", sim_duratio
                 angle = 0.0
             else:
                 angle = ((data.time - settle_time) * drive_freq * 2 * np.pi) % (2 * np.pi)
+                ang_range = np.pi/3
+                # angle = ang_range * np.sin((data.time - settle_time) * drive_freq * 2 * np.pi) + ang_range/2    
 
             for i in range(4):
                 body_idx = i + 2
