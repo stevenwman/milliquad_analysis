@@ -100,13 +100,15 @@ def main():
     import xml.etree.ElementTree as ET
     
     # Constants for steps
-    STEP_HEIGHT = 0.001 # 1 mm
+    STEP_HEIGHT = 0.0015 # 1 mm
     STEP_WIDTH = 0.1   # 5 cm
-    STEP_LENGTH = 0.005  # 5 cm
-    NUM_STEPS = 15 
-    START_X = 0.05      # 5 cm
+    STEP_LENGTH = 0.0045  # 4.5 mm
+    FINAL_STEP_LENGTH = 0.02  # Length of the final step (default: same as regular steps)
+    NUM_STEPS = 5 
+    START_X = 0.0075      # 5 cm
 
-    original_scene_path = "mulit_milli_quad/scene_1.xml"
+    original_scene_path = "mulit_milli_quad/scene_4.xml"
+    # original_scene_path = "wheel_milli_quad/scene_wheel.xml"
     edited_scene_path = original_scene_path.replace(".xml", "_edited.xml")
     
     try:
@@ -122,9 +124,18 @@ def main():
 
         if worldbody is not None:
             for i in range(NUM_STEPS):
+                # Determine step length (use final step length for the last step)
+                is_final_step = (i == NUM_STEPS - 1)
+                step_length = FINAL_STEP_LENGTH if is_final_step else STEP_LENGTH
+                
                 # Calculate position
-                # x: start + i*length + half_length (center)
-                pos_x = START_X + i * STEP_LENGTH + STEP_LENGTH / 2.0
+                # x: start + cumulative length of previous steps + half_length (center)
+                if is_final_step:
+                    # For final step: sum of all previous steps + half of final step length
+                    pos_x = START_X + (NUM_STEPS - 1) * STEP_LENGTH + step_length / 2.0
+                else:
+                    # For regular steps: i*length + half_length (center)
+                    pos_x = START_X + i * STEP_LENGTH + step_length / 2.0
                 pos_y = 0.0
                 # z: (i+1)*height - half_height (center)
                 # This stacks them like a staircase where the top surface of step i is at (i+1)*height
@@ -135,7 +146,7 @@ def main():
                 geom = ET.Element('geom')
                 geom.set('name', f'step_{i}')
                 geom.set('type', 'box')
-                geom.set('size', f"{STEP_LENGTH/2.0} {STEP_WIDTH/2.0} {STEP_HEIGHT/2.0}")
+                geom.set('size', f"{step_length/2.0} {STEP_WIDTH/2.0} {STEP_HEIGHT/2.0}")
                 geom.set('pos', f"{pos_x} {pos_y} {pos_z}")
                 # geom.set('material', 'groundplane') 
                 geom.set('rgba', '0.5 0.5 0.5 1') # Medium grey
