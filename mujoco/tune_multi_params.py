@@ -154,7 +154,15 @@ def objective(**params):
         ],
         # Keep other params constant for now
         'dof_damping': 7e-10,
-        'kp_mag': params['kp_mag']
+        'kp_mag': params['kp_mag'],
+        'mag_params': {
+            # For now we keep these fixed. If you want to tune them, add
+            # corresponding dimensions to `space` and wire them through here.
+            'm_mag': 1.0,
+            'k_int': 0.0,
+            'mu0_over_4pi': 1e-7,
+            'r_eps': 1e-4,
+        },
     }
 
     total_cost = 0
