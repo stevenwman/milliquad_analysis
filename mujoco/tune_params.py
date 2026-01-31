@@ -30,7 +30,9 @@ space = [
     Real(0.1, 2.0, "uniform", name='solref_dampratio'),
     Real(0.8, 0.99, "uniform", name='solimp_dmin'),
     Real(0.95, 0.999, "uniform", name='solimp_dmax'),
-    Real(1e-4, 1e-2, "log-uniform", name='solimp_width')
+    Real(1e-4, 1e-2, "log-uniform", name='solimp_width'),
+    # Real(0.0, 1e-5, "log-uniform", name='k_int'),  # coupling strength
+    # Real(0.1, 10.0, "log-uniform", name='m_mag'),  # dipole moment
 ]
 
 # --- Old Cost Function (for reference) ---
@@ -156,7 +158,15 @@ def objective(**params):
         ],
         # Keep other params constant for now
         'dof_damping': 7e-10,
-        'kp_mag': 2.5e-6
+        'kp_mag': 2.5e-6,
+        'mag_params': {
+            # For now we keep these fixed. If you want to tune them, add
+            # corresponding dimensions to `space` and wire them through here.
+            'm_mag': 1.0,
+            'k_int': 0.0,
+            'mu0_over_4pi': 1e-7,
+            'r_eps': 1e-4,
+        },
     }
 
     trajectory = sim_optimizer.run_simulation(
