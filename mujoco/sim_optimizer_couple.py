@@ -16,6 +16,11 @@ STUCK_THRESHOLD = 0.005  # Minimum movement distance to avoid "stuck" detection 
 SIM_TIMESTEP = 1.0 / 2000.0  # MuJoCo timestep (seconds)
 VIDEO_FRAMERATE = 60.0  # Frames per second for video recording
 
+MU0_OVER_4PI = 1e-7 # μ₀/(4π) in SI (N/A²). Dipole field B = (μ₀/4π) r⁻³ [3(m·r̂)r̂ − m]. No need to tune.
+R_EPS = 1e-6 # Minimum r in dipole field to avoid 1/r³ blow-up when bodies are very close (meters).
+MAGNETIC_MOMENT = 1.13e-3
+MAGNETIC_FIELD_MAGNITUDE = 2e-3
+
 
 def add_visual_arrow(scene, from_point, to_point, radius=0.001, rgba=(0, 0, 1, 1)):
     """
@@ -81,12 +86,12 @@ def _get_magnet_state(data, i):
     return body_idx, pos, north
 
 
-def _dipole_field(mj, r_vec, mu0_over_4pi=1e-7, r_eps=1e-4):
-    """Magnetic field B at offset r_vec from dipole moment mj."""
+def _dipole_field(mj, r_vec):
+    """Magnetic field B at offset r_vec from dipole moment mj. Uses MU0_OVER_4PI, R_EPS."""
     r = np.linalg.norm(r_vec)
-    r = max(r, r_eps)
+    r = max(r, R_EPS)
     rhat = r_vec / r
-    return mu0_over_4pi * (1.0 / r**3) * (3.0 * np.dot(mj, rhat) * rhat - mj)
+    return MU0_OVER_4PI * (1.0 / r**3) * (3.0 * np.dot(mj, rhat) * rhat - mj)
 
 
 def _compute_external_torques(data, angle, kp_mag, settle_time):
@@ -107,10 +112,10 @@ def _compute_external_torques(data, angle, kp_mag, settle_time):
     return tau_ext
 
 
-def _compute_interjoint_torques(data, m_mag, k_int, mu0_over_4pi=1e-7, r_eps=1e-4):
-    """Return tau_int[4,3] world torques from dipole-dipole coupling (no side effects)."""
+def _compute_interjoint_torques(data, m_mag):
+    """Return tau_int[4,3] world torques from dipole-dipole coupling (no side effects). τ = m × B."""
     tau_int = np.zeros((4, 3))
-    if k_int == 0.0 or m_mag == 0.0:
+    if m_mag == 0.0:
         return tau_int
 
     # Gather states once
@@ -128,8 +133,8 @@ def _compute_interjoint_torques(data, m_mag, k_int, mu0_over_4pi=1e-7, r_eps=1e-
         for j in range(4):
             if j == i:
                 continue
-            Bi += _dipole_field(m[j], pos[i] - pos[j], mu0_over_4pi=mu0_over_4pi, r_eps=r_eps)
-        tau_int[i] = k_int * np.cross(m[i], Bi)  # τ = m × B
+            Bi += _dipole_field(m[j], pos[i] - pos[j])
+        tau_int[i] = np.cross(m[i], Bi)  # τ = m × B
 
     return tau_int
 
@@ -154,7 +159,7 @@ def _apply_magnetic_forces(model, data, kp_mag, drive_freq, settle_time, mag_par
     # Inter-joint torques from dipole-dipole coupling.
     # Be strict here: all required parameters must be provided explicitly so we
     # don't accidentally run with silent defaults.
-    required_keys = ("m_mag", "k_int", "mu0_over_4pi", "r_eps")
+    required_keys = ("m_mag",)
     for key in required_keys:
         if key not in mag_params:
             raise ValueError(
@@ -162,13 +167,7 @@ def _apply_magnetic_forces(model, data, kp_mag, drive_freq, settle_time, mag_par
                 "Define it in the optimization loop / caller."
             )
 
-    tau_int = _compute_interjoint_torques(
-        data,
-        m_mag=mag_params["m_mag"],
-        k_int=mag_params["k_int"],
-        mu0_over_4pi=mag_params["mu0_over_4pi"],
-        r_eps=mag_params["r_eps"],
-    )
+    tau_int = _compute_interjoint_torques(data, m_mag=mag_params["m_mag"])
 
     # Apply total torque to bodies
     for i in range(4):
@@ -288,31 +287,33 @@ def _check_stuck_condition(data, last_check_pos, last_check_time, settle_time,
 def _do_simulation_step(model, data, trajectory, kp_mag, drive_freq, settle_time,
                        mag_params,
                        last_check_pos, last_check_time, stuck_check_interval,
-                       stuck_threshold, ignore_stuck_detection, debug):
+                       stuck_threshold, ignore_stuck_detection, debug,
+                       benchmark=False, step_times=None):
     """
     Execute one simulation step: apply forces, step physics, check stability, record state.
     Returns (angle, updated_last_check_pos, updated_last_check_time).
+    When benchmark=True, step_times is a dict (e.g. defaultdict(list)) to accumulate seconds per phase.
     """
-    # Apply magnetic forces and get drive angle
+    if benchmark and step_times is not None:
+        t0 = time.perf_counter()
     step_cache = {}
     angle = _apply_magnetic_forces(model, data, kp_mag, drive_freq, settle_time, mag_params, step_cache)
-    
-    # Step simulation
+    if benchmark and step_times is not None:
+        step_times["apply_forces"].append(time.perf_counter() - t0)
+        t0 = time.perf_counter()
     mujoco.mj_step(model, data)
-    
-    # Check for instability
+    if benchmark and step_times is not None:
+        step_times["mj_step"].append(time.perf_counter() - t0)
+        t0 = time.perf_counter()
     _check_instability(model, data)
-    
-    # Record state (including torque decomposition)
     _record_state(trajectory, data, step_cache)
-    
-    # Check if stuck
+    if benchmark and step_times is not None:
+        step_times["record_state"].append(time.perf_counter() - t0)
     if not ignore_stuck_detection:
         last_check_pos, last_check_time = _check_stuck_condition(
             data, last_check_pos, last_check_time, settle_time,
             stuck_check_interval, stuck_threshold, debug
         )
-    
     return angle, last_check_pos, last_check_time
 
 
@@ -359,6 +360,7 @@ def run_simulation(
     sim_duration=10.0, 
     visualize=False, 
     record_path=None,
+    benchmark=False,
     debug=False, 
     ignore_stuck_detection=False
     ):
@@ -380,6 +382,8 @@ def run_simulation(
             if `record_path` is set.
         record_path (str, optional): If provided, runs the simulation headlessly
             and records a video to this path.
+        benchmark (bool): If True, run headlessly and print step-level timing
+            (apply_forces, mj_step, record_state) after the run.
         debug (bool): If True, prints detailed information when a 'stuck'
             condition is detected before raising an error.
         ignore_stuck_detection (bool): If True, the simulation will not terminate
@@ -467,20 +471,29 @@ def run_simulation(
             # Headless mode (with or without recording)
             frame_time_step = 1.0 / VIDEO_FRAMERATE
             next_frame_time = 0.0
-            
+            step_times = None
+            if benchmark:
+                from collections import defaultdict
+                step_times = defaultdict(list)
             while data.time < sim_duration:
                 angle, last_check_pos, last_check_time = _do_simulation_step(
                     model, data, trajectory, kp_mag, drive_freq, SETTLE_TIME,
                     mag_params,
                     last_check_pos, last_check_time, STUCK_CHECK_INTERVAL,
-                    STUCK_THRESHOLD, ignore_stuck_detection, debug
+                    STUCK_THRESHOLD, ignore_stuck_detection, debug,
+                    benchmark=benchmark, step_times=step_times
                 )
-                
-                # Capture frame if recording (angle unused but returned for consistency)
                 if record_path:
                     next_frame_time = _maybe_capture_frame(
                         renderer, cam, data, frames, next_frame_time, frame_time_step
                     )
+            if benchmark and step_times:
+                n = len(step_times["mj_step"])
+                apply_s = sum(step_times["apply_forces"])
+                step_s = sum(step_times["mj_step"])
+                record_s = sum(step_times["record_state"])
+                total_s = apply_s + step_s + record_s
+                print(f"  Step timing ({n} steps): apply_forces={apply_s:.3f}s, mj_step={step_s:.3f}s, record_state={record_s:.3f}s (total={total_s:.3f}s)")
                 
     except ValueError as e:
         if "Simulation unstable" in str(e) or "stuck in a loop" in str(e):
@@ -514,12 +527,7 @@ if __name__ == "__main__":
         'solref': [0.004, 1],
         'solimp': [0.95, 0.99, 1e-3, 0.5, 1.0],
         'kp_mag': 2.5e-6,
-        'mag_params': {
-            'm_mag': 1.0,
-            'k_int': 0.0,
-            'mu0_over_4pi': 1e-7,
-            'r_eps': 1e-4,
-        },
+        'mag_params': {'m_mag': MAGNETIC_MOMENT},
     }
     
     # Example of a headless run for optimization

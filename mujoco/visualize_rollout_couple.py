@@ -1,6 +1,7 @@
 import csv
 import argparse
 import sim_optimizer_couple as sim_optimizer  # ty:ignore[unresolved-import]
+from sim_optimizer_couple import MAGNETIC_MOMENT, MAGNETIC_FIELD_MAGNITUDE
 
 def main():
     """
@@ -62,6 +63,7 @@ def main():
 
     # --- 3. Reconstruct the simulation parameters ---
     try:
+        # Friction, solref, solimp from CSV
         sim_params = {
             'ground_friction': [
                 float(selected_run['sliding_friction']),
@@ -79,11 +81,20 @@ def main():
                 0.5,
                 1.0
             ],
-            # Use the same constant values as the optimizer
-            'dof_damping': 7e-10,
-            # 'kp_mag': 2.5e-6
-            'kp_mag': float(selected_run['kp_mag'])
+            'dof_damping': float(selected_run.get('dof_damping', 7e-10)),
         }
+        # kp_mag and mag_params: multi CSV has fudges; old CSV may have kp_mag or neither (use fudge=1)
+        if 'magnetic_moment_fudge' in selected_run and 'magnetic_field_fudge' in selected_run:
+            m_mag = MAGNETIC_MOMENT * float(selected_run['magnetic_moment_fudge'])
+            kp_mag = m_mag * MAGNETIC_FIELD_MAGNITUDE * float(selected_run['magnetic_field_fudge'])
+        elif 'kp_mag' in selected_run:
+            kp_mag = float(selected_run['kp_mag'])
+            m_mag = kp_mag / MAGNETIC_FIELD_MAGNITUDE
+        else:
+            m_mag = MAGNETIC_MOMENT
+            kp_mag = m_mag * MAGNETIC_FIELD_MAGNITUDE
+        sim_params['kp_mag'] = kp_mag
+        sim_params['mag_params'] = {'m_mag': m_mag}
     except KeyError as e:
         print(f"Error: Missing parameter {e} in the CSV file.")
         return
