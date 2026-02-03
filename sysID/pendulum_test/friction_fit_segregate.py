@@ -11,6 +11,7 @@ from sklearn.preprocessing import PolynomialFeatures
 
 # Physical parameters
 J_INITIAL = 9.33e-12 
+# magnetic moment of the magnet in A⋅m²
 B_MAGNET_INITIAL = 0.00113 
 
 def load_data(data_dir):

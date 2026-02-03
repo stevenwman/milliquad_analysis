@@ -1,3 +1,4 @@
+import os
 import time
 import numpy as np
 from skopt import Optimizer
@@ -45,8 +46,24 @@ N_CALLS = 200  # Number of optimization iterations
 SIM_DURATION = 5.0  # Simulation time per run (seconds). Shorter = faster iterations, noisier cost.
 SIMULATION_TIMEOUT = 20  # Wall-clock s per worker. scene4 (4-legged) is heavier; bump to 30+ if it still times out.
 ROLLOUTS_PER_SCENE = 1  # Sims per scene per iteration. Use 1 when sim is deterministic (same params → same cost); >1 only helps with noisy sims.
-BATCH_SIZE = 10  # BO proposes this many points at once; we evaluate them in parallel (different params, not same params 10×).
+# 16 cores: use BATCH_SIZE=8 so 8×2=16 tasks = one full wave (~18s/batch). BATCH_SIZE=10 would give 20 tasks → 16+4 waves (~25s).
+BATCH_SIZE = 8
+# One scene per process; cap at core count so we don't oversubscribe.
+NUM_SCENES = len(MJCF_PATHS)
+POOL_SIZE = min(os.cpu_count() or 16, BATCH_SIZE * NUM_SCENES)  # cap at cores; 16 cores → 16 workers, 16 tasks/batch
 VERBOSE_BATCH = True  # If True, print cost / speed residual (cm/s) / tumble for each of the N points per batch.
+PROFILE_BATCH = True  # If True, print per-batch timing: ask, sim, aggregate, tell, csv (and verbose if VERBOSE_BATCH).
+# Surrogate: "gp" = Gaussian process (ask/tell blow up with n, ~30s by batch 20). "rf" or "et" = random/extra trees (fast, ask/tell stay ~0.1s).
+BASE_ESTIMATOR = "rf"
+
+# Seed from older single-scene opt (optimized_params/optimization_results.csv row abe1b74c). Fewer params there; assume fudges=1, damping=7e-10.
+SEED_FROM_OLD_CSV = False
+# Order: sliding, torsional, rolling, solref_tc, solref_dr, solimp_dmin, solimp_dmax, solimp_width, moment_fudge, field_fudge, dof_damping
+SEED_POINT = [
+    0.00014225746640521907, 0.0021388784110800154, 5.292387847485097e-05,
+    0.001, 0.7414912155887285, 0.9084351427617432, 0.9734506827063522, 0.0037927813470769885,
+    1.0, 1.0, 7e-10,
+]
 
 # --- Cost function constants (tune these to change what the optimizer cares about) ---
 COST_SETTLE_TIME = 0.1  # Time after which we measure velocity (s). Must match sim_optimizer_couple.SETTLE_TIME.
@@ -159,16 +176,12 @@ def _point_to_params(point):
     return {dim.name: point[i] for i, dim in enumerate(space)}
 
 
-def _evaluate_point(point):
-    """
-    Evaluate one param point: run both scenes (scene4, scene2), return res dict.
-    Used by batch BO; runs in a worker (no nested pool).
-    """
-    import sim_optimizer_couple as _sim
+def _sim_params_from_point(point):
+    """Build sim_params dict from one point (list). Same shape as _evaluate_point used."""
     params = _point_to_params(point)
     m_mag = MAGNETIC_MOMENT * params['magnetic_moment_fudge']
     kp_mag = m_mag * MAGNETIC_FIELD_MAGNITUDE * params['magnetic_field_fudge']
-    sim_params = {
+    return {
         'ground_friction': [params['sliding_friction'], params['torsional_friction'], params['rolling_friction']],
         'solref': [params['solref_timeconst'], params['solref_dampratio']],
         'solimp': [params['solimp_dmin'], params['solimp_dmax'], params['solimp_width'], 0.5, 1.0],
@@ -176,74 +189,146 @@ def _evaluate_point(point):
         'kp_mag': kp_mag,
         'mag_params': {'m_mag': m_mag},
     }
+
+
+def _evaluate_one_scene(args):
+    """
+    Run one scene for one point. Used by 1-scene-per-process pool.
+    args: (point_index, point, scene_name, mjcf_path)
+    Returns: (point_index, scene_name, cost, velocity, tumble, wall_time)
+    """
+    point_index, point, scene_name, mjcf_path = args
+    import sim_optimizer_couple as _sim
+    sim_params = _sim_params_from_point(point)
+    target_velocity = TARGET_VELOCITIES[scene_name]
     t0 = time.perf_counter()
-    total_cost = 0.0
-    scene_costs = {}
-    scene_avg_velocities = {}
-    scene_tumble = {}
-    for scene, mjcf_path in MJCF_PATHS.items():
-        trajectory = _sim.run_simulation(sim_params, mjcf_path=mjcf_path, sim_duration=SIM_DURATION, visualize=False)
-        target_velocity = TARGET_VELOCITIES[scene]
-        if trajectory is None:
-            cost_data = {'total_cost': COST_FAILURE, 'avg_forward_velocity': 0.0, 'tumble_penalty': 0.0}
-        else:
-            cost_data = calculate_cost(trajectory, target_velocity, verbose=False)
-        scene_costs[scene] = cost_data['total_cost']
-        scene_avg_velocities[scene] = cost_data['avg_forward_velocity']
-        scene_tumble[scene] = cost_data.get('tumble_penalty', 0.0)
-        total_cost += cost_data['total_cost']
+    trajectory = _sim.run_simulation(sim_params, mjcf_path=mjcf_path, sim_duration=SIM_DURATION, visualize=False)
     wall_time = time.perf_counter() - t0
-    return {
-        'id': str(uuid.uuid4().hex)[:8],
-        'cost': total_cost,
-        'params': params,
-        'scene_costs': scene_costs,
-        'scene_avg_velocities': scene_avg_velocities,
-        'scene_tumble': scene_tumble,
-        'wall_time': wall_time,
-    }
+    if trajectory is None:
+        cost_data = {'total_cost': COST_FAILURE, 'avg_forward_velocity': 0.0, 'tumble_penalty': 0.0}
+    else:
+        cost_data = calculate_cost(trajectory, target_velocity, verbose=False)
+    return (point_index, scene_name, cost_data['total_cost'], cost_data['avg_forward_velocity'],
+            cost_data.get('tumble_penalty', 0.0), wall_time)
 
 
-# 2. Batch BO: optimizer proposes BATCH_SIZE points, we evaluate them in parallel.
+def _aggregate_scene_results(points, scene_results):
+    """Turn list of (point_index, scene_name, cost, velocity, tumble, wall_time) into list of full result dicts (one per point)."""
+    from collections import defaultdict
+    by_point = defaultdict(lambda: {"scene_costs": {}, "scene_avg_velocities": {}, "scene_tumble": {}, "scene_wall_times": []})
+    for (point_index, scene_name, cost, velocity, tumble, wall_time) in scene_results:
+        by_point[point_index]["scene_costs"][scene_name] = cost
+        by_point[point_index]["scene_avg_velocities"][scene_name] = velocity
+        by_point[point_index]["scene_tumble"][scene_name] = tumble
+        by_point[point_index]["scene_wall_times"].append(wall_time)
+    results = []
+    for point_index in sorted(by_point.keys()):
+        d = by_point[point_index]
+        params = _point_to_params(points[point_index])
+        total_cost = sum(d["scene_costs"].values())
+        # Per-point "time" = max(scene times) since the two scenes run in parallel (different workers)
+        point_wall = max(d["scene_wall_times"]) if d["scene_wall_times"] else 0.0
+        results.append({
+            'id': str(uuid.uuid4().hex)[:8],
+            'cost': total_cost,
+            'params': params,
+            'scene_costs': d["scene_costs"],
+            'scene_avg_velocities': d["scene_avg_velocities"],
+            'scene_tumble': d["scene_tumble"],
+            'wall_time': point_wall,
+        })
+    return results
+
+
+# 2. Batch BO: optimizer proposes BATCH_SIZE points; we run 1 scene per process (BATCH_SIZE * num_scenes tasks in parallel).
 def _run_batch_optimization():
     global pool
-    pool = multiprocessing.Pool(processes=BATCH_SIZE)
     optimizer = Optimizer(
         dimensions=space,
-        base_estimator="gp",
+        base_estimator=BASE_ESTIMATOR,
         n_initial_points=20,
         random_state=42,
     )
     n_done = 0
+    # Optional: seed with one point from older opt (evaluated in main process, no pool yet)
+    if SEED_FROM_OLD_CSV:
+        print("\n--- Seed from old CSV (optimization_results.csv abe1b74c, fudges=1, damping=7e-10) ---")
+        scene_results = [_evaluate_one_scene((0, SEED_POINT, sn, path)) for sn, path in MJCF_PATHS.items()]
+        seed_results = _aggregate_scene_results([SEED_POINT], scene_results)
+        seed_result = seed_results[0]
+        optimizer.tell([SEED_POINT], [seed_result["cost"]])
+        all_results.append(seed_result)
+        _append_result_to_csv(seed_result)
+        n_done = 1
+        sav = seed_result["scene_avg_velocities"]
+        st = seed_result.get("scene_tumble", {})
+        res_str = " | ".join(f"{s}: {(sav.get(s, 0) - TARGET_VELOCITIES[s]) * 100:+.1f} cm/s" for s in MJCF_PATHS.keys())
+        tum_str = " | ".join(f"{s}: {st.get(s, 0.0):.4f}" for s in MJCF_PATHS.keys())
+        print(f"  Seed cost={seed_result['cost']:.6f} | residual: {res_str} | tumble: {tum_str} | id={seed_result['id']}\n")
+    pool = multiprocessing.Pool(processes=POOL_SIZE)
     batch_num = 0
     try:
         while n_done < N_CALLS:
             n_this = min(BATCH_SIZE, N_CALLS - n_done)
             batch_num += 1
-            print(f"\n--- Batch {batch_num}: asking for {n_this} points ({n_done + 1}–{n_done + n_this} / {N_CALLS}) ---")
+            print(f"\n--- Batch {batch_num}: asking for {n_this} points ({n_done + 1}–{n_done + n_this} / {N_CALLS}), {n_this * NUM_SCENES} scene tasks ---")
+            t_ask = time.perf_counter()
             points = optimizer.ask(n_points=n_this)
             if n_this == 1:
                 points = [points]
-            results = pool.map(_evaluate_point, points)
+            t_ask = time.perf_counter() - t_ask
+            # One scene per process: (point_index, point, scene_name, mjcf_path)
+            tasks = [
+                (i, point, scene_name, mjcf_path)
+                for i, point in enumerate(points)
+                for scene_name, mjcf_path in MJCF_PATHS.items()
+            ]
+            t_sim = time.perf_counter()
+            scene_results = pool.map(_evaluate_one_scene, tasks)
+            t_sim = time.perf_counter() - t_sim
+            t_agg = time.perf_counter()
+            results = _aggregate_scene_results(points, scene_results)
             costs = [r["cost"] for r in results]
+            t_agg = time.perf_counter() - t_agg
+            t_tell = time.perf_counter()
             optimizer.tell(points, costs)
+            t_tell = time.perf_counter() - t_tell
+            t_csv = time.perf_counter()
             for r in results:
                 all_results.append(r)
                 _append_result_to_csv(r)
+            t_csv = time.perf_counter() - t_csv
             n_done += n_this
+            t_verbose = 0.0
             if VERBOSE_BATCH:
+                t_verbose = time.perf_counter()
                 for i, r in enumerate(results):
                     sav = r["scene_avg_velocities"]
                     st = r.get("scene_tumble", {})
-                    # residual = actual - target; positive = faster than target. Show in cm/s.
                     residuals_cm_s = " | ".join(
                         f"{s}: {(sav.get(s, 0) - TARGET_VELOCITIES[s]) * 100:+.1f} cm/s"
                         for s in MJCF_PATHS.keys()
                     )
-                    tumbles = " | ".join(f"{s}: {st.get(s, 0):.2f}" for s in MJCF_PATHS.keys())
+                    # tumble = per-scene tumble_penalty from calculate_cost; use .4f so small values visible
+                    tumbles = " | ".join(f"{s}: {st.get(s, 0.0):.4f}" for s in MJCF_PATHS.keys())
                     wt = r.get("wall_time", 0)
                     print(f"    [{i+1}/{n_this}] cost={r['cost']:.4f} | residual: {residuals_cm_s} | tumble: {tumbles} | time: {wt:.1f}s")
-            print(f"  Batch done. Costs: min={min(costs):.4f}, max={max(costs):.4f}")
+                t_verbose = time.perf_counter() - t_verbose
+            batch_wall = t_ask + t_sim + t_agg + t_tell + t_csv + t_verbose
+            print(f"  Batch wall: {batch_wall:.1f}s | Costs: min={min(costs):.4f}, max={max(costs):.4f}")
+            if PROFILE_BATCH:
+                # tell = GP fit (grows with n_observations); use 3 decimals so early batches show e.g. 0.001s
+                parts = f"ask={t_ask:.3f}s sim={t_sim:.2f}s agg={t_agg:.3f}s tell={t_tell:.3f}s csv={t_csv:.3f}s"
+                if VERBOSE_BATCH:
+                    parts += f" verbose={t_verbose:.3f}s"
+                print(f"  Profile: {parts}")
+            # Updated best trial so far (after this batch)
+            best_so_far = min(all_results, key=lambda r: r["cost"])
+            sav = best_so_far["scene_avg_velocities"]
+            st = best_so_far.get("scene_tumble", {})
+            res_str = " | ".join(f"{s}: {(sav.get(s, 0) - TARGET_VELOCITIES[s]) * 100:+.1f} cm/s" for s in MJCF_PATHS.keys())
+            tum_str = " | ".join(f"{s}: {st.get(s, 0.0):.4f}" for s in MJCF_PATHS.keys())
+            print(f"  Best so far (n={n_done}): cost={best_so_far['cost']:.6f} | residual: {res_str} | tumble: {tum_str} | id={best_so_far['id']}")
     finally:
         if pool:
             pool.terminate()

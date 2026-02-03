@@ -2,14 +2,23 @@ import numpy as np
 from skopt import gp_minimize
 from skopt.space import Real, Integer
 from skopt.utils import use_named_args
-import sim_optimizer as sim_optimizer
+import sim_optimizer_couple as sim_optimizer
+from sim_optimizer_couple import MAGNETIC_MOMENT, MAGNETIC_FIELD_MAGNITUDE
 from scipy.spatial.transform import Rotation as R
 import csv
 import uuid
 
 # --- Optimization Configuration ---
-TARGET_VELOCITY = 0.21  # 21 cm/s
+TARGET_VELOCITY = 0.21  # 21 cm/s — desired forward speed
 N_CALLS = 20  # Number of optimization iterations
+
+# --- Cost function constants (tune these to change what the optimizer cares about) ---
+COST_SETTLE_TIME = 0.1  # Time after which we measure velocity (s). Must match sim_optimizer_couple.SETTLE_TIME.
+TUMBLE_THRESHOLD = 0.3  # cos(angle) below this = "tumbling". ~0.3 ≈ 72.5° from vertical.
+TUMBLE_PENALTY_SCALE = 0.1  # Per-frame penalty when uprightness < threshold: (1 - uprightness) * this.
+COST_FAILURE = 1e6  # Cost when simulation fails or trajectory is empty.
+VELOCITY_COST_WEIGHT = 1.0  # Weight for (avg_velocity - target)².
+TUMBLE_COST_WEIGHT = 1.0  # Weight for tumble penalty sum.
 
 # This list will store detailed results from each trial
 all_results = []
@@ -31,53 +40,10 @@ space = [
     Real(0.8, 0.99, "uniform", name='solimp_dmin'),
     Real(0.95, 0.999, "uniform", name='solimp_dmax'),
     Real(1e-4, 1e-2, "log-uniform", name='solimp_width'),
-    # Real(0.0, 1e-5, "log-uniform", name='k_int'),  # coupling strength
-    # Real(0.1, 10.0, "log-uniform", name='m_mag'),  # dipole moment
+    Real(0.5, 1.5, "uniform", name='magnetic_moment_fudge'),
+    Real(0.5, 1.5, "uniform", name='magnetic_field_fudge'),
+    Real(7e-11, 7e-9, "log-uniform", name='dof_damping'), # used to be constant 7e-10
 ]
-
-# --- Old Cost Function (for reference) ---
-# def calculate_cost(trajectory, target_velocity):
-#     """
-#     Calculates a cost based on simulation trajectory, penalizing instability
-#     and rewarding consistent forward progress towards a target velocity.
-#     Returns a dictionary with detailed metrics.
-#     """
-#     if not trajectory:
-#         return {'total_cost': 1e6, 'avg_forward_velocity': 0}
-#
-#     # --- 1. Forward Velocity Cost (over total time) ---
-#     final_state = trajectory[-1]
-#     duration = final_state['time']
-#
-#     avg_forward_velocity = 0
-#     if duration > 0:
-#         avg_forward_velocity = final_state['pos'][0] / duration
-#
-#     velocity_error = (avg_forward_velocity - target_velocity)**2
-#
-#     # --- 2. Stability Cost (Tumbling Penalty) ---
-#     tumble_penalty = 0
-#     UP_VECTOR = np.array([0, 0, 1])
-#     TUMBLE_THRESHOLD = 0.3
-#
-#     for state in trajectory:
-#         quat = state['quat']
-#         body_z_axis = R.from_quat(quat).apply([0, 0, 1])
-#         uprightness = np.dot(body_z_axis, UP_VECTOR)
-#
-#         if uprightness < TUMBLE_THRESHOLD:
-#             tumble_penalty += (1 - uprightness) * 0.1
-#
-#     total_cost = velocity_error + tumble_penalty
-#
-#     print(
-#         f"  Avg Vel: {avg_forward_velocity:.3f} m/s | "
-#         f"Vel Err: {velocity_error:.4f} | "
-#         f"Tumble Pen: {tumble_penalty:.4f} | "
-#         f"Total Cost: {total_cost:.4f}"
-#     )
-#
-#     return {'total_cost': total_cost, 'avg_forward_velocity': avg_forward_velocity}
 
 
 def calculate_cost(trajectory, target_velocity):
@@ -87,43 +53,35 @@ def calculate_cost(trajectory, target_velocity):
     Returns a dictionary with detailed metrics.
     """
     if not trajectory:
-        return {'total_cost': 1e6, 'avg_forward_velocity': 0}
+        return {'total_cost': COST_FAILURE, 'avg_forward_velocity': 0}
 
     # --- 1. Forward Velocity Cost (over active time) ---
     final_state = trajectory[-1]
-    settle_time = 0.1 # Must match the value in sim_optimizer.py
-
-    # Find the starting state after the settling period
     start_state = trajectory[0]
     for state in trajectory:
-        if state['time'] >= settle_time:
+        if state['time'] >= COST_SETTLE_TIME:
             start_state = state
             break
 
     active_duration = final_state['time'] - start_state['time']
-    
     avg_forward_velocity = 0
-    if active_duration > 1e-6: # Avoid division by zero
-        # Forward displacement is distance traveled on x-axis during active time
+    if active_duration > 1e-6:
         forward_displacement = final_state['pos'][0] - start_state['pos'][0]
         avg_forward_velocity = forward_displacement / active_duration
-    
-    velocity_error = (avg_forward_velocity - target_velocity)**2
+
+    velocity_error = (avg_forward_velocity - target_velocity) ** 2
 
     # --- 2. Stability Cost (Tumbling Penalty) ---
     tumble_penalty = 0
     UP_VECTOR = np.array([0, 0, 1])
-    TUMBLE_THRESHOLD = 0.3 # Corresponds to a tilt of ~72.5 degrees
-
     for state in trajectory:
         quat = state['quat']
         body_z_axis = R.from_quat(quat).apply([0, 0, 1])
         uprightness = np.dot(body_z_axis, UP_VECTOR)
-        
         if uprightness < TUMBLE_THRESHOLD:
-            tumble_penalty += (1 - uprightness) * 0.1 
+            tumble_penalty += (1 - uprightness) * TUMBLE_PENALTY_SCALE
 
-    total_cost = velocity_error + tumble_penalty
+    total_cost = VELOCITY_COST_WEIGHT * velocity_error + TUMBLE_COST_WEIGHT * tumble_penalty
     
     print(
         f"  Avg Vel: {avg_forward_velocity:.3f} m/s | "
@@ -142,6 +100,9 @@ def objective(**params):
     """
     Objective function for the Bayesian optimizer.
     """
+    m_mag = MAGNETIC_MOMENT * params['magnetic_moment_fudge']
+    kp_mag = m_mag * MAGNETIC_FIELD_MAGNITUDE * params['magnetic_field_fudge']
+
     sim_params = {
         'ground_friction': [
             params['sliding_friction'],
@@ -157,15 +118,14 @@ def objective(**params):
             1.0   # default power
         ],
         # Keep other params constant for now
-        'dof_damping': 7e-10,
-        'kp_mag': 2.5e-6,
+        'dof_damping': params['dof_damping'],
+        # 'kp_mag': 2.5e-6,
+        'kp_mag': kp_mag,
         'mag_params': {
             # For now we keep these fixed. If you want to tune them, add
             # corresponding dimensions to `space` and wire them through here.
-            'm_mag': 1.0,
-            'k_int': 0.0,
-            'mu0_over_4pi': 1e-7,
-            'r_eps': 1e-4,
+            # 'm_mag': 1.0,
+            'm_mag': m_mag,
         },
     }
 
@@ -175,7 +135,7 @@ def objective(**params):
     
     if trajectory is None:
         print("  Simulation unstable. Assigning large penalty.")
-        cost_data = {'total_cost': 1e6, 'avg_forward_velocity': 0}
+        cost_data = {'total_cost': COST_FAILURE, 'avg_forward_velocity': 0}
     else:
         cost_data = calculate_cost(trajectory, TARGET_VELOCITY)
 
@@ -248,7 +208,8 @@ if __name__ == "__main__":
         rank = i + 1
 
         print(f"\n#{rank}: Cost={result_data['cost']:.6f}, Avg Velocity={result_data['avg_velocity']:.4f} m/s")
-        
+        m_mag = MAGNETIC_MOMENT * result_data['params']['magnetic_moment_fudge']
+        kp_mag = m_mag * MAGNETIC_FIELD_MAGNITUDE * result_data['params']['magnetic_field_fudge']
         sim_params = {
             'ground_friction': [
                 result_data['params']['sliding_friction'],
@@ -262,12 +223,13 @@ if __name__ == "__main__":
             'solimp': [
                 result_data['params']['solimp_dmin'],
                 result_data['params']['solimp_dmax'],
-                result_data['params']['solimp_width'], 
-                0.5, 
+                result_data['params']['solimp_width'],
+                0.5,
                 1.0
             ],
-            'dof_damping': 7e-10,
-            'kp_mag': 2.5e-6
+            'dof_damping': result_data['params']['dof_damping'],
+            'kp_mag': kp_mag,
+            'mag_params': {'m_mag': m_mag},
         }
 
         video_dir = "top_5_rollouts"
