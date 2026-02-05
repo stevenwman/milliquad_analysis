@@ -32,12 +32,6 @@ MAGNETIC_MOMENT = 1.13e-3
 MAGNETIC_FIELD_MAGNITUDE = 2e-3
 
 # ---------------------------------------------------------------------------
-# Contact solver defaults (solimp midpoint & power — previously magic numbers)
-# ---------------------------------------------------------------------------
-SOLIMP_MIDPOINT = 0.5
-SOLIMP_POWER = 1.0
-
-# ---------------------------------------------------------------------------
 # Scene configuration
 # ---------------------------------------------------------------------------
 TARGET_VELOCITIES: dict[str, float] = {
@@ -69,11 +63,13 @@ BASE_ESTIMATOR = "rf"
 # ---------------------------------------------------------------------------
 SEED_FROM_OLD_CSV = False
 # Order: sliding, torsional, rolling, solref_tc, solref_dr, solimp_dmin,
-#        solimp_dmax, solimp_width, moment_fudge, field_fudge, dof_damping
+#        solimp_dmax, solimp_width, solimp_midpoint, solimp_power,
+#        moment_fudge, field_fudge, dof_damping
 SEED_POINT: list[float] = [
     0.00014225746640521907, 0.0021388784110800154, 5.292387847485097e-05,
     0.001, 0.7414912155887285, 0.9084351427617432, 0.9734506827063522,
     0.0037927813470769885,
+    0.5, 1.0,
     1.0, 1.0, 7e-10,
 ]
 
@@ -87,7 +83,7 @@ VELOCITY_COST_WEIGHT = 1.0
 TUMBLE_COST_WEIGHT = 1.0
 
 # ---------------------------------------------------------------------------
-# Search space (11 dimensions)
+# Search space (13 dimensions)
 # ---------------------------------------------------------------------------
 space: list[Real] = [
     Real(1e-5, 0.8, "log-uniform", name="sliding_friction"),
@@ -98,6 +94,8 @@ space: list[Real] = [
     Real(0.8, 0.99, "uniform", name="solimp_dmin"),
     Real(0.95, 0.999, "uniform", name="solimp_dmax"),
     Real(1e-4, 1e-2, "log-uniform", name="solimp_width"),
+    Real(0.1, 0.9, "uniform", name="solimp_midpoint"),
+    Real(1.0, 6.0, "uniform", name="solimp_power"),
     Real(0.5, 1.5, "uniform", name="magnetic_moment_fudge"),
     Real(0.5, 1.5, "uniform", name="magnetic_field_fudge"),
     Real(7e-11, 7e-9, "log-uniform", name="dof_damping"),
@@ -145,8 +143,8 @@ def sim_params_from_point(point: list[float]) -> dict[str, Any]:
             params["solimp_dmin"],
             params["solimp_dmax"],
             params["solimp_width"],
-            SOLIMP_MIDPOINT,
-            SOLIMP_POWER,
+            params["solimp_midpoint"],
+            params["solimp_power"],
         ],
         "dof_damping": params["dof_damping"],
         "kp_mag": kp_mag,
