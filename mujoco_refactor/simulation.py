@@ -182,8 +182,16 @@ def _apply_magnetic_forces(model, data, kp_mag, drive_freq, settle_time, mag_par
         body_idx, _, _ = _get_magnet_state(data, i)
         data.xfrc_applied[body_idx, 3:6] += tau_ext[i] + tau_int[i]
 
+    # Angular velocity of each leg body in world frame (for power computation).
+    # Captured *before* mj_step so omega is at the same instant as the torques.
+    omega = np.zeros((4, 3))
+    for i in range(4):
+        body_idx = i + 2
+        omega[i] = data.cvel[body_idx, :3]
+
     step_cache["tau_ext"] = tau_ext
     step_cache["tau_int"] = tau_int
+    step_cache["omega"] = omega
     step_cache["angle"] = angle
 
     return angle
@@ -247,6 +255,8 @@ def _record_state(trajectory, data, step_cache=None):
             entry["tau_ext"] = step_cache["tau_ext"].copy()
         if "tau_int" in step_cache:
             entry["tau_int"] = step_cache["tau_int"].copy()
+        if "omega" in step_cache:
+            entry["omega"] = step_cache["omega"].copy()
         if "angle" in step_cache:
             entry["drive_angle"] = float(step_cache["angle"])
     trajectory.append(entry)

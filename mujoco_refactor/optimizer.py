@@ -357,8 +357,8 @@ if __name__ == "__main__":
         pass
 
     # Local state — no globals (fix #4)
-    all_results: list[dict] = []
-    pool: multiprocessing.Pool | None = None
+    all_results = []
+    pool = None
 
     try:
         pool = multiprocessing.Pool(processes=POOL_SIZE)
