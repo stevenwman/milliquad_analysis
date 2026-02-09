@@ -14,7 +14,7 @@ import multiprocessing
 import time
 import uuid
 from collections import defaultdict
-from typing import Any
+from typing import Any, NamedTuple
 
 import numpy as np
 from scipy.spatial.transform import Rotation as R
@@ -25,8 +25,6 @@ from config import (
     BATCH_SIZE,
     COST_FAILURE,
     CSV_PATH,
-    MAGNETIC_FIELD_MAGNITUDE,
-    MAGNETIC_MOMENT,
     MJCF_PATHS,
     N_CALLS,
     NUM_SCENES,
@@ -49,9 +47,19 @@ from config import (
 )
 
 
+class OptResult(NamedTuple):
+    """Result of optimization run, matching skopt's result interface."""
+    fun: float  # best cost found
+    x: list[float]  # best point (in space order)
+
+
 # ---------------------------------------------------------------------------
 # Cost function
 # ---------------------------------------------------------------------------
+
+# Unit vector for uprightness check (world Z-axis)
+_UP_VECTOR = np.array([0.0, 0.0, 1.0])
+
 
 def calculate_cost(
     trajectory: list[dict],
@@ -85,11 +93,10 @@ def calculate_cost(
 
     # Stability cost (tumbling penalty)
     tumble_penalty = 0.0
-    UP_VECTOR = np.array([0, 0, 1])
     for state in trajectory:
         quat = state["quat"]
-        body_z_axis = R.from_quat(quat).apply([0, 0, 1])
-        uprightness = np.dot(body_z_axis, UP_VECTOR)
+        body_z_axis = R.from_quat(quat, scalar_first=True).apply(_UP_VECTOR)
+        uprightness = np.dot(body_z_axis, _UP_VECTOR)
         if uprightness < TUMBLE_THRESHOLD:
             tumble_penalty += (1 - uprightness) * TUMBLE_PENALTY_SCALE
 
@@ -154,7 +161,7 @@ def _evaluate_one_scene(args):
 # Result aggregation
 # ---------------------------------------------------------------------------
 
-def _aggregate_scene_results(points, scene_results):
+def _aggregate_scene_results(points: list, scene_results: list) -> list[dict]:
     """Turn list of per-scene results into list of full result dicts (one per point)."""
     by_point = defaultdict(
         lambda: {"scene_costs": {}, "scene_avg_velocities": {}, "scene_tumble": {}, "scene_wall_times": []}
@@ -237,7 +244,7 @@ def _print_best_so_far(all_results: list[dict], n_done: int) -> None:
 # Main optimization loop
 # ---------------------------------------------------------------------------
 
-def _run_batch_optimization(all_results: list[dict], pool: multiprocessing.Pool):
+def _run_batch_optimization(all_results: list[dict], pool: multiprocessing.Pool) -> OptResult:
     """
     Batch Bayesian optimization: propose BATCH_SIZE points, evaluate all scenes
     in parallel, tell optimizer the costs, repeat.
@@ -333,7 +340,10 @@ def _run_batch_optimization(all_results: list[dict], pool: multiprocessing.Pool)
         _print_best_so_far(all_results, n_done)
 
     best = min(all_results, key=lambda r: r["cost"])
-    return type("Result", (), {"fun": best["cost"], "x": [best["params"][dim.name] for dim in space]})()
+    return OptResult(
+        fun=best["cost"],
+        x=[best["params"][dim.name] for dim in space],
+    )
 
 
 # ---------------------------------------------------------------------------

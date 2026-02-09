@@ -20,13 +20,11 @@ from config import (
     MAGNETIC_MOMENT,
     MJCF_PATHS,
     SETTLE_TIME,
-    sim_params_from_point,
-    space,
 )
 import simulation
 
 
-def _sim_params_from_csv_row(row):
+def _sim_params_from_csv_row(row: dict[str, str]) -> dict:
     """Reconstruct sim_params from a CSV row.
 
     Handles both current format (with fudges) and older formats.
@@ -70,7 +68,11 @@ def _sim_params_from_csv_row(row):
 # Cost of Transport analysis
 # ---------------------------------------------------------------------------
 
-def compute_locomotion_metrics(trajectory, robot_mass, g=9.81):
+def compute_locomotion_metrics(
+    trajectory: list[dict],
+    robot_mass: float,
+    g: float = 9.81,
+) -> dict[str, float] | None:
     """
     Compute energy, average power, and cost of transport from a trajectory.
 
@@ -150,7 +152,7 @@ def compute_locomotion_metrics(trajectory, robot_mass, g=9.81):
     }
 
 
-def print_locomotion_metrics(metrics):
+def print_locomotion_metrics(metrics: dict[str, float] | None) -> None:
     """Pretty-print the output of compute_locomotion_metrics."""
     if metrics is None:
         print("\n  Could not compute locomotion metrics.")
@@ -248,6 +250,7 @@ def main():
             sim_duration=10.0,
             visualize=False,
             ignore_stuck_detection=True,
+            progress=True,
         )
 
     # Compute and print locomotion metrics
