@@ -22,6 +22,14 @@ import pathlib
 from scipy.spatial.transform import Rotation as R
 
 from config import (
+    CAMERA_DISTANCE_RECORD,
+    CAMERA_DISTANCE_VIEWER,
+    INITIAL_LEG_ANGLES,
+    INITIAL_QUATERNION,
+    INITIAL_Z_HEIGHT,
+    LEG_BODY_OFFSET,
+    MAGNETIC_FIELD_MAGNITUDE,
+    MAGNETIC_MOMENT,
     MU0_OVER_4PI,
     PACKAGE_DIR,
     R_EPS,
@@ -30,8 +38,8 @@ from config import (
     STUCK_CHECK_INTERVAL,
     STUCK_THRESHOLD,
     VIDEO_FRAMERATE,
-    MAGNETIC_MOMENT,
-    MAGNETIC_FIELD_MAGNITUDE,
+    VIDEO_HEIGHT,
+    VIDEO_WIDTH,
 )
 
 
@@ -77,11 +85,11 @@ def add_text(data, viewer, text_input):
 # Simulation helper functions
 # ---------------------------------------------------------------------------
 
-def _initialize_pose(data):
-    """Initialize the robot pose. Main body at z=0.002, quaternion identity, legs at pi."""
-    data.qpos[2] = 0.002
-    data.qpos[3:7] = [0, 0, 1, 0]
-    data.qpos[7:11] = np.pi * np.ones(4)
+def _initialize_pose(data) -> None:
+    """Initialize the robot pose. Main body raised, rotated 180° about z, legs at π."""
+    data.qpos[2] = INITIAL_Z_HEIGHT
+    data.qpos[3:7] = INITIAL_QUATERNION
+    data.qpos[7:11] = INITIAL_LEG_ANGLES * np.ones(4)
 
 
 def _compute_drive_angle(sim_time: float, drive_freq: float, settle_time: float) -> float:
@@ -91,9 +99,9 @@ def _compute_drive_angle(sim_time: float, drive_freq: float, settle_time: float)
     return ((sim_time - settle_time) * drive_freq * 2 * np.pi) % (2 * np.pi)
 
 
-def _get_magnet_state(data, i):
-    """Return (body_idx, pos_world, north_world_unit) for leg i."""
-    body_idx = i + 2
+def _get_magnet_state(data, i: int) -> tuple[int, np.ndarray, np.ndarray]:
+    """Return (body_idx, pos_world, north_world_unit) for leg i (0-3)."""
+    body_idx = i + LEG_BODY_OFFSET
     pos = data.xpos[body_idx].copy()
     quat = data.xquat[body_idx]
     Rwb = R.from_quat(quat, scalar_first=True).as_matrix()
@@ -106,14 +114,14 @@ def _get_magnet_state(data, i):
     return body_idx, pos, north
 
 
-def _dipole_field(mj, r_vec):
+def _dipole_field(mj: np.ndarray, r_vec: np.ndarray) -> np.ndarray:
     """Magnetic field B at offset r_vec from dipole moment mj."""
     r = max(np.linalg.norm(r_vec), R_EPS)
     rhat = r_vec / r
     return MU0_OVER_4PI * (1.0 / r**3) * (3.0 * np.dot(mj, rhat) * rhat - mj)
 
 
-def _compute_external_torques(data, angle, kp_mag, settle_time):
+def _compute_external_torques(data, angle: float, kp_mag: float, settle_time: float) -> np.ndarray:
     """Return tau_ext[4,3] world torques from external drive (no side effects)."""
     tau_ext = np.zeros((4, 3))
     if data.time <= settle_time:
@@ -131,7 +139,7 @@ def _compute_external_torques(data, angle, kp_mag, settle_time):
     return tau_ext
 
 
-def _compute_interjoint_torques(data, m_mag):
+def _compute_interjoint_torques(data, m_mag: float) -> np.ndarray:
     """Return tau_int[4,3] world torques from dipole-dipole coupling (τ = m × B)."""
     tau_int = np.zeros((4, 3))
     if m_mag == 0.0:
@@ -157,7 +165,14 @@ def _compute_interjoint_torques(data, m_mag):
     return tau_int
 
 
-def _apply_magnetic_forces(model, data, kp_mag, drive_freq, settle_time, mag_params, step_cache):
+def _apply_magnetic_forces(
+    data,
+    kp_mag: float,
+    drive_freq: float,
+    settle_time: float,
+    mag_params: dict,
+    step_cache: dict,
+) -> float:
     """
     Apply magnetic torques to 4 leg bodies based on external drive and inter-joint coupling.
 
@@ -186,8 +201,7 @@ def _apply_magnetic_forces(model, data, kp_mag, drive_freq, settle_time, mag_par
     # Captured *before* mj_step so omega is at the same instant as the torques.
     omega = np.zeros((4, 3))
     for i in range(4):
-        body_idx = i + 2
-        omega[i] = data.cvel[body_idx, :3]
+        omega[i] = data.cvel[i + LEG_BODY_OFFSET, :3]
 
     step_cache["tau_ext"] = tau_ext
     step_cache["tau_int"] = tau_int
@@ -230,7 +244,7 @@ def _update_viewer_overlays(viewer, data, drive_freq, kp_mag, initial_pos, angle
     add_text(data, viewer, text_to_display)
 
 
-def _check_instability(model, data):
+def _check_instability(model, data) -> None:
     """Check for simulation instability. Raises ValueError if unstable."""
     if not np.all(np.isfinite(data.qacc)):
         raise ValueError("Simulation unstable: Non-finite accelerations (qacc).")
@@ -242,7 +256,7 @@ def _check_instability(model, data):
         raise ValueError("Simulation unstable: Non-finite values in solver.")
 
 
-def _record_state(trajectory, data, step_cache=None):
+def _record_state(trajectory: list[dict], data, step_cache: dict | None = None) -> None:
     """Record current state to trajectory list."""
     entry = {
         "time": data.time,
@@ -262,8 +276,15 @@ def _record_state(trajectory, data, step_cache=None):
     trajectory.append(entry)
 
 
-def _check_stuck_condition(data, last_check_pos, last_check_time, settle_time,
-                           stuck_check_interval, stuck_threshold, debug):
+def _check_stuck_condition(
+    data,
+    last_check_pos: np.ndarray | None,
+    last_check_time: float,
+    settle_time: float,
+    stuck_check_interval: float,
+    stuck_threshold: float,
+    debug: bool,
+) -> tuple[np.ndarray | None, float]:
     """
     Check if robot is stuck. Returns updated (last_check_pos, last_check_time).
     Raises ValueError if stuck.
@@ -294,11 +315,23 @@ def _check_stuck_condition(data, last_check_pos, last_check_time, settle_time,
     return last_check_pos, last_check_time
 
 
-def _do_simulation_step(model, data, trajectory, kp_mag, drive_freq, settle_time,
-                        mag_params,
-                        last_check_pos, last_check_time, stuck_check_interval,
-                        stuck_threshold, ignore_stuck_detection, debug,
-                        benchmark=False, step_times=None):
+def _do_simulation_step(
+    model,
+    data,
+    trajectory: list[dict],
+    kp_mag: float,
+    drive_freq: float,
+    settle_time: float,
+    mag_params: dict,
+    last_check_pos: np.ndarray | None,
+    last_check_time: float,
+    stuck_check_interval: float,
+    stuck_threshold: float,
+    ignore_stuck_detection: bool,
+    debug: bool,
+    benchmark: bool = False,
+    step_times: dict | None = None,
+) -> tuple[float, np.ndarray | None, float]:
     """
     Execute one simulation step: apply forces, step physics, check stability, record state.
     Returns (angle, updated_last_check_pos, updated_last_check_time).
@@ -306,7 +339,7 @@ def _do_simulation_step(model, data, trajectory, kp_mag, drive_freq, settle_time
     if benchmark and step_times is not None:
         t0 = time.perf_counter()
     step_cache = {}
-    angle = _apply_magnetic_forces(model, data, kp_mag, drive_freq, settle_time, mag_params, step_cache)
+    angle = _apply_magnetic_forces(data, kp_mag, drive_freq, settle_time, mag_params, step_cache)
     if benchmark and step_times is not None:
         step_times["apply_forces"].append(time.perf_counter() - t0)
         t0 = time.perf_counter()
@@ -326,7 +359,9 @@ def _do_simulation_step(model, data, trajectory, kp_mag, drive_freq, settle_time
     return angle, last_check_pos, last_check_time
 
 
-def _maybe_capture_frame(renderer, cam, data, frames, next_frame_time, frame_time_step):
+def _maybe_capture_frame(
+    renderer, cam, data, frames: list, next_frame_time: float, frame_time_step: float
+) -> float:
     """Capture a frame if it's time. Returns updated next_frame_time."""
     if renderer and data.time >= next_frame_time:
         renderer.update_scene(data, cam)
@@ -336,7 +371,7 @@ def _maybe_capture_frame(renderer, cam, data, frames, next_frame_time, frame_tim
     return next_frame_time
 
 
-def _write_video(record_path, frames, framerate):
+def _write_video(record_path: str, frames: list, framerate: float) -> None:
     """Write collected frames to video file."""
     if not frames:
         return
@@ -375,6 +410,7 @@ def run_simulation(
     benchmark: bool = False,
     debug: bool = False,
     ignore_stuck_detection: bool = False,
+    progress: bool = False,
 ) -> list[dict] | None:
     """
     Run a MuJoCo simulation with given parameters and return the trajectory.
@@ -389,6 +425,7 @@ def run_simulation(
         benchmark: Print step-level timing after the run.
         debug: Print detailed info on stuck detection.
         ignore_stuck_detection: Skip early termination for stuck robots.
+        progress: Show a tqdm progress bar during headless runs.
 
     Returns:
         List of trajectory dicts, or None if simulation was unstable.
@@ -414,7 +451,8 @@ def run_simulation(
     mag_params = params.get("mag_params", {})
 
     model.opt.timestep = SIM_TIMESTEP
-    model.opt.enableflags |= 1 << 0  # enable override
+    # Enable global contact parameter overrides (o_solref, o_solimp) for all contacts
+    model.opt.enableflags |= mujoco.mjtEnableBit.mjENBL_OVERRIDE
 
     data = mujoco.MjData(model)
     _initialize_pose(data)
@@ -426,12 +464,13 @@ def run_simulation(
     cam = None
 
     if record_path:
-        renderer = mujoco.Renderer(model, height=480, width=640)
+        renderer = mujoco.Renderer(model, height=VIDEO_HEIGHT, width=VIDEO_WIDTH)
         cam = mujoco.MjvCamera()
         cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
         cam.trackbodyid = 1
-        cam.distance = 0.2
+        cam.distance = CAMERA_DISTANCE_RECORD
 
+    pbar = None
     try:
         mujoco.mj_step(model, data)
 
@@ -449,7 +488,7 @@ def run_simulation(
             with mujoco.viewer.launch_passive(model, data, key_callback=key_callback) as viewer:
                 viewer.cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
                 viewer.cam.trackbodyid = 1
-                viewer.cam.distance = 0.1
+                viewer.cam.distance = CAMERA_DISTANCE_VIEWER
 
                 while viewer.is_running() and data.time < sim_duration:
                     if not paused:
@@ -470,6 +509,12 @@ def run_simulation(
             if benchmark:
                 from collections import defaultdict
                 step_times = defaultdict(list)
+
+            total_steps = int(sim_duration / SIM_TIMESTEP)
+            if progress:
+                from tqdm import tqdm
+                pbar = tqdm(total=total_steps, unit="step", desc="Sim", leave=False)
+
             while data.time < sim_duration:
                 angle, last_check_pos, last_check_time = _do_simulation_step(
                     model, data, trajectory, kp_mag, drive_freq, SETTLE_TIME,
@@ -482,6 +527,12 @@ def run_simulation(
                     next_frame_time = _maybe_capture_frame(
                         renderer, cam, data, frames, next_frame_time, frame_time_step
                     )
+                if pbar is not None:
+                    pbar.update(1)
+
+            if pbar is not None:
+                pbar.close()
+
             if benchmark and step_times:
                 n = len(step_times["mj_step"])
                 apply_s = sum(step_times["apply_forces"])
@@ -491,6 +542,8 @@ def run_simulation(
                 print(f"  Step timing ({n} steps): apply_forces={apply_s:.3f}s, mj_step={step_s:.3f}s, record_state={record_s:.3f}s (total={total_s:.3f}s)")
 
     except ValueError as e:
+        if pbar is not None:
+            pbar.close()
         if "Simulation unstable" in str(e) or "stuck in a loop" in str(e):
             print(f"  Simulation failed gracefully: {e}")
             return None

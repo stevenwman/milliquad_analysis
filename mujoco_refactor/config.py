@@ -21,7 +21,22 @@ SETTLE_TIME = 0.1  # seconds before driving starts
 STUCK_CHECK_INTERVAL = 5.0  # seconds between stuck checks
 STUCK_THRESHOLD = 0.005  # minimum movement (meters) to avoid "stuck"
 SIM_TIMESTEP = 1.0 / 2000.0  # MuJoCo timestep (2 kHz)
+
+# Initial robot pose
+INITIAL_Z_HEIGHT = 0.002  # meters above ground
+INITIAL_QUATERNION = (0, 0, 1, 0)  # 180° rotation about z-axis (w, x, y, z)
+INITIAL_LEG_ANGLES = np.pi  # all legs start at π radians
+
+# Body indexing: leg bodies are offset from leg index (0-3) by this amount
+# Body 0 = world, Body 1 = main chassis, Bodies 2-5 = legs FR/FL/BR/BL
+LEG_BODY_OFFSET = 2
+
+# Video recording
 VIDEO_FRAMERATE = 60.0  # frames per second for video recording
+VIDEO_WIDTH = 640
+VIDEO_HEIGHT = 480
+CAMERA_DISTANCE_RECORD = 0.2  # camera distance when recording video
+CAMERA_DISTANCE_VIEWER = 0.1  # camera distance in interactive viewer
 
 # ---------------------------------------------------------------------------
 # Physics / magnetic constants
@@ -39,8 +54,8 @@ TARGET_VELOCITIES: dict[str, float] = {
     "scene2": 0.14,  # 14 cm/s for 2-legged robot
 }
 MJCF_PATHS: dict[str, str] = {
-    "scene4": str(PACKAGE_DIR / "mulit_milli_quad" / "scene_4.xml"),
-    "scene2": str(PACKAGE_DIR / "mulit_milli_quad" / "scene_2.xml"),
+    "scene4": str(PACKAGE_DIR / "multi_milli_quad" / "scene_4.xml"),
+    "scene2": str(PACKAGE_DIR / "multi_milli_quad" / "scene_2.xml"),
 }
 
 # ---------------------------------------------------------------------------
