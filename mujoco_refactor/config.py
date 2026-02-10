@@ -4,7 +4,6 @@ Shared constants, search space definition, and parameter conversion.
 Single source of truth for all values shared between simulation and optimization.
 """
 
-import os
 import pathlib
 from typing import Any
 
@@ -26,6 +25,9 @@ SIM_TIMESTEP = 1.0 / 2000.0  # MuJoCo timestep (2 kHz)
 INITIAL_Z_HEIGHT = 0.002  # meters above ground
 INITIAL_QUATERNION = (0, 0, 1, 0)  # 180° rotation about z-axis (w, x, y, z)
 INITIAL_LEG_ANGLES = np.pi  # all legs start at π radians
+INIT_YAW_JITTER_DEG = 0  # max +/- yaw jitter (deg) applied at init; 0 = off
+INIT_JITTER_TRIALS = 1  # number of jittered trials per point (>=1)
+INIT_JITTER_SEED = 12345  # base seed for deterministic jitter
 
 # Body indexing: leg bodies are offset from leg index (0-3) by this amount
 # Body 0 = world, Body 1 = main chassis, Bodies 2-5 = legs FR/FL/BR/BL
@@ -50,43 +52,43 @@ MAGNETIC_FIELD_MAGNITUDE = 2e-3
 # Scene configuration
 # ---------------------------------------------------------------------------
 TARGET_VELOCITIES: dict[str, float] = {
-    "scene4": 0.21,  # 21 cm/s for 4-legged robot
-    "scene2": 0.14,  # 14 cm/s for 2-legged robot
+    # "scene4": 0.21,  # 21 cm/s for 4-legged robot
+    # "scene2": 0.14,  # 14 cm/s for 2-legged robot
+    "scene4": 0.0,  # 21 cm/s for 4-legged robot
+    "scene2": 0.0,  # 14 cm/s for 2-legged robot
 }
 MJCF_PATHS: dict[str, str] = {
     "scene4": str(PACKAGE_DIR / "multi_milli_quad" / "scene_4.xml"),
     "scene2": str(PACKAGE_DIR / "multi_milli_quad" / "scene_2.xml"),
 }
+DEFAULT_CTRL_FREQ = 30.0  # Hz when no per-row control frequency is provided
+
+# Optional reference dataset for optimization. If empty, falls back to TARGET_VELOCITIES.
+# Fields:
+#   id (optional): stable unique key for CSV columns and replay filenames
+#   scene (required): key in MJCF_PATHS
+#   ctrl_freq (optional): drive frequency in Hz (default DEFAULT_CTRL_FREQ)
+#   speed (required): target speed in m/s
+#   pitch_amp_deg (optional): target detrended RMS pitch amplitude in deg
+#   pitch_weight (optional): per-row weight for pitch amplitude error term
+#   weight (optional): per-row multiplier on total row cost when aggregating
+REFERENCE_DATA: list[dict[str, Any]] = [
+    {"scene": "scene4", "ctrl_freq": 30.0, "speed": 0.21, "pitch_amp_deg": 25.0, "pitch_weight": 0.0, "weight": 1.0},
+    {"scene": "scene2", "ctrl_freq": 30.0, "speed": 0.14, "pitch_amp_deg": 25.0, "pitch_weight": 0.0, "weight": 1.0},
+]
 
 # ---------------------------------------------------------------------------
 # Optimization hyper-parameters
 # ---------------------------------------------------------------------------
 N_CALLS = 200  # total optimization iterations
-SIM_DURATION = 5.0  # seconds per simulation run
+SIM_DURATION = 3.0  # seconds per simulation run
 SIMULATION_TIMEOUT = 20  # wall-clock seconds per worker
 ROLLOUTS_PER_SCENE = 1  # sims per scene per iteration (>1 only for noisy sims)
-BATCH_SIZE = 8  # points proposed per batch (8×2 scenes = 16 tasks)
-NUM_SCENES = len(MJCF_PATHS)
-POOL_SIZE = min(os.cpu_count() or 16, BATCH_SIZE * NUM_SCENES)
+BATCH_SIZE = 8  # points proposed per optimizer step
 VERBOSE_BATCH = True
 PROFILE_BATCH = True
 # "rf" = random forest (fast ask/tell); "gp" = Gaussian process (slow at high n)
-BASE_ESTIMATOR = "rf"
-
-# ---------------------------------------------------------------------------
-# Seed from older single-scene optimization
-# ---------------------------------------------------------------------------
-SEED_FROM_OLD_CSV = False
-# Order: sliding, torsional, rolling, solref_tc, solref_dr, solimp_dmin,
-#        solimp_dmax, solimp_width, solimp_midpoint, solimp_power,
-#        moment_fudge, field_fudge, dof_damping
-SEED_POINT: list[float] = [
-    0.00014225746640521907, 0.0021388784110800154, 5.292387847485097e-05,
-    0.001, 0.7414912155887285, 0.9084351427617432, 0.9734506827063522,
-    0.0037927813470769885,
-    0.5, 1.0,
-    1.0, 1.0, 7e-10,
-]
+BASE_ESTIMATOR = "gp"
 
 # ---------------------------------------------------------------------------
 # Cost-function constants
@@ -96,6 +98,8 @@ TUMBLE_PENALTY_SCALE = 0.1  # per-frame penalty when uprightness < threshold
 COST_FAILURE = 1e6  # cost for failed / empty trajectory
 VELOCITY_COST_WEIGHT = 1.0
 TUMBLE_COST_WEIGHT = 1.0
+PITCH_RMS_TARGET_DEG = 0.0  # target RMS pitch (deg); set when you have reference
+PITCH_RMS_WEIGHT = 0.0  # set >0 to include RMS pitch in objective
 
 # ---------------------------------------------------------------------------
 # Search space (13 dimensions)
@@ -122,12 +126,66 @@ space: list[Real] = [
 CSV_PATH = "multi_optimization_results.csv"
 
 
+def _make_ref_id(scene: str, ctrl_freq: float) -> str:
+    """Build a stable reference ID for CSV columns."""
+    freq_str = f"{ctrl_freq:g}".replace(".", "p")
+    return f"{scene}_f{freq_str}"
+
+
+def reference_rows() -> list[dict[str, Any]]:
+    """Return reference rows for optimization (fallback to TARGET_VELOCITIES)."""
+    if REFERENCE_DATA:
+        rows = []
+        seen_ids = set()
+        for row in REFERENCE_DATA:
+            scene = row["scene"]
+            ctrl_freq = float(row.get("ctrl_freq", DEFAULT_CTRL_FREQ))
+            speed = float(row["speed"])
+            weight = float(row.get("weight", 1.0))
+            pitch_amp_deg = row.get("pitch_amp_deg", None)
+            pitch_weight = float(row.get("pitch_weight", PITCH_RMS_WEIGHT))
+            ref_id = str(row.get("id", _make_ref_id(scene, ctrl_freq)))
+            if ref_id in seen_ids:
+                raise ValueError(f"Duplicate reference id '{ref_id}' in REFERENCE_DATA")
+            seen_ids.add(ref_id)
+            rows.append({
+                "id": ref_id,
+                "scene": scene,
+                "ctrl_freq": ctrl_freq,
+                "speed": speed,
+                "pitch_amp_deg": pitch_amp_deg,
+                "pitch_weight": pitch_weight,
+                "weight": weight,
+            })
+        return rows
+
+    return [
+        {
+            "id": _make_ref_id(scene, DEFAULT_CTRL_FREQ),
+            "scene": scene,
+            "ctrl_freq": DEFAULT_CTRL_FREQ,
+            "speed": speed,
+            "pitch_amp_deg": None,
+            "pitch_weight": PITCH_RMS_WEIGHT,
+            "weight": 1.0,
+        }
+        for scene, speed in TARGET_VELOCITIES.items()
+    ]
+
+
+def reference_ids() -> list[str]:
+    """Reference IDs for CSV columns."""
+    return [row["id"] for row in reference_rows()]
+
+
 def csv_fieldnames() -> list[str]:
     """Column names for the results CSV."""
     param_names = [dim.name for dim in space]
     scene_cost_names = [f"cost_{scene}" for scene in MJCF_PATHS]
     scene_vel_names = [f"velocity_{scene}" for scene in MJCF_PATHS]
-    return ["id", "cost"] + scene_vel_names + scene_cost_names + param_names
+    ref_cost_names = [f"cost_{rid}" for rid in reference_ids()]
+    ref_vel_names = [f"velocity_{rid}" for rid in reference_ids()]
+    return ["id", "cost"] + scene_vel_names + scene_cost_names + ref_vel_names + ref_cost_names + param_names
 
 
 # ---------------------------------------------------------------------------
