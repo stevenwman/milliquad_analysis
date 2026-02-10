@@ -12,6 +12,7 @@ Usage:
 
 import time
 from typing import Any
+import os
 
 import imageio
 import imageio.plugins.ffmpeg
@@ -85,10 +86,22 @@ def add_text(data, viewer, text_input):
 # Simulation helper functions
 # ---------------------------------------------------------------------------
 
-def _initialize_pose(data) -> None:
+def _initialize_pose(
+    data,
+    init_yaw_jitter_deg: float = 0.0,
+    rng: np.random.Generator | None = None,
+) -> None:
     """Initialize the robot pose. Main body raised, rotated 180° about z, legs at π."""
     data.qpos[2] = INITIAL_Z_HEIGHT
-    data.qpos[3:7] = INITIAL_QUATERNION
+    if init_yaw_jitter_deg > 0.0:
+        if rng is None:
+            rng = np.random.default_rng()
+        yaw = np.deg2rad(rng.uniform(-init_yaw_jitter_deg, init_yaw_jitter_deg))
+        base = R.from_quat(INITIAL_QUATERNION, scalar_first=True)
+        jitter = R.from_euler("z", yaw, degrees=False)
+        data.qpos[3:7] = (jitter * base).as_quat(scalar_first=True)
+    else:
+        data.qpos[3:7] = INITIAL_QUATERNION
     data.qpos[7:11] = INITIAL_LEG_ANGLES * np.ones(4)
 
 
@@ -411,6 +424,8 @@ def run_simulation(
     debug: bool = False,
     ignore_stuck_detection: bool = False,
     progress: bool = False,
+    init_yaw_jitter_deg: float = 0.0,
+    rng_seed: int | None = None,
 ) -> list[dict] | None:
     """
     Run a MuJoCo simulation with given parameters and return the trajectory.
@@ -425,7 +440,7 @@ def run_simulation(
         benchmark: Print step-level timing after the run.
         debug: Print detailed info on stuck detection.
         ignore_stuck_detection: Skip early termination for stuck robots.
-        progress: Show a tqdm progress bar during headless runs.
+        progress: Print 20% timestep milestones during headless runs.
 
     Returns:
         List of trajectory dicts, or None if simulation was unstable.
@@ -455,7 +470,8 @@ def run_simulation(
     model.opt.enableflags |= mujoco.mjtEnableBit.mjENBL_OVERRIDE
 
     data = mujoco.MjData(model)
-    _initialize_pose(data)
+    rng = np.random.default_rng(rng_seed) if rng_seed is not None else None
+    _initialize_pose(data, init_yaw_jitter_deg=init_yaw_jitter_deg, rng=rng)
     initial_pos = data.qpos[:3].copy()
 
     trajectory = []
@@ -470,7 +486,13 @@ def run_simulation(
         cam.trackbodyid = 1
         cam.distance = CAMERA_DISTANCE_RECORD
 
-    pbar = None
+    progress_thresholds = None
+    next_progress_idx = 0
+    if progress and sim_duration > 0:
+        progress_thresholds = [0.2, 0.4, 0.6, 0.8, 1.0]
+        scene_name = pathlib.Path(mjcf_path).stem
+        seed_label = rng_seed if rng_seed is not None else "none"
+        print(f"[sim pid={os.getpid()} scene={scene_name} seed={seed_label}] start")
     try:
         mujoco.mj_step(model, data)
 
@@ -510,11 +532,6 @@ def run_simulation(
                 from collections import defaultdict
                 step_times = defaultdict(list)
 
-            total_steps = int(sim_duration / SIM_TIMESTEP)
-            if progress:
-                from tqdm import tqdm
-                pbar = tqdm(total=total_steps, unit="step", desc="Sim", leave=False)
-
             while data.time < sim_duration:
                 angle, last_check_pos, last_check_time = _do_simulation_step(
                     model, data, trajectory, kp_mag, drive_freq, SETTLE_TIME,
@@ -527,11 +544,18 @@ def run_simulation(
                     next_frame_time = _maybe_capture_frame(
                         renderer, cam, data, frames, next_frame_time, frame_time_step
                     )
-                if pbar is not None:
-                    pbar.update(1)
-
-            if pbar is not None:
-                pbar.close()
+                if progress_thresholds is not None:
+                    frac = min(1.0, data.time / sim_duration)
+                    while (
+                        next_progress_idx < len(progress_thresholds)
+                        and frac >= progress_thresholds[next_progress_idx]
+                    ):
+                        pct = int(progress_thresholds[next_progress_idx] * 100)
+                        print(
+                            f"[sim pid={os.getpid()} scene={scene_name} seed={seed_label}] {pct}% "
+                            f"(t={data.time:.2f}/{sim_duration:.2f}s)"
+                        )
+                        next_progress_idx += 1
 
             if benchmark and step_times:
                 n = len(step_times["mj_step"])
@@ -542,8 +566,6 @@ def run_simulation(
                 print(f"  Step timing ({n} steps): apply_forces={apply_s:.3f}s, mj_step={step_s:.3f}s, record_state={record_s:.3f}s (total={total_s:.3f}s)")
 
     except ValueError as e:
-        if pbar is not None:
-            pbar.close()
         if "Simulation unstable" in str(e) or "stuck in a loop" in str(e):
             print(f"  Simulation failed gracefully: {e}")
             return None

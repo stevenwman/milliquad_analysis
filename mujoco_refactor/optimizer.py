@@ -11,9 +11,12 @@ Usage:
 
 import csv
 import multiprocessing
+import os
+import pathlib
 import time
 import uuid
 from collections import defaultdict
+from datetime import datetime
 from typing import Any, NamedTuple
 
 import numpy as np
@@ -25,16 +28,19 @@ from config import (
     BATCH_SIZE,
     COST_FAILURE,
     CSV_PATH,
+    INIT_JITTER_SEED,
+    INIT_JITTER_TRIALS,
+    INIT_YAW_JITTER_DEG,
     MJCF_PATHS,
     N_CALLS,
-    NUM_SCENES,
-    POOL_SIZE,
     PROFILE_BATCH,
-    SEED_FROM_OLD_CSV,
-    SEED_POINT,
     SETTLE_TIME,
     SIM_DURATION,
-    TARGET_VELOCITIES,
+    DEFAULT_CTRL_FREQ,
+    reference_rows,
+    reference_ids,
+    PITCH_RMS_TARGET_DEG,
+    PITCH_RMS_WEIGHT,
     TUMBLE_COST_WEIGHT,
     TUMBLE_PENALTY_SCALE,
     TUMBLE_THRESHOLD,
@@ -53,6 +59,22 @@ class OptResult(NamedTuple):
     x: list[float]  # best point (in space order)
 
 
+# Reference rows derived from config (falls back to TARGET_VELOCITIES in config.py)
+_REF_ROWS = reference_rows()
+if not _REF_ROWS:
+    raise ValueError("No reference rows defined. Set TARGET_VELOCITIES or REFERENCE_DATA.")
+_SCENE_TARGETS = {}
+for _row in _REF_ROWS:
+    _scene = _row["scene"]
+    _w = float(_row.get("weight", 1.0))
+    _SCENE_TARGETS.setdefault(_scene, {"num": 0.0, "den": 0.0})
+    _SCENE_TARGETS[_scene]["num"] += _w * float(_row["speed"])
+    _SCENE_TARGETS[_scene]["den"] += _w
+_SCENE_TARGETS = {
+    s: (v["num"] / v["den"] if v["den"] > 0 else 0.0)
+    for s, v in _SCENE_TARGETS.items()
+}
+
 # ---------------------------------------------------------------------------
 # Cost function
 # ---------------------------------------------------------------------------
@@ -64,6 +86,8 @@ _UP_VECTOR = np.array([0.0, 0.0, 1.0])
 def calculate_cost(
     trajectory: list[dict],
     target_velocity: float,
+    pitch_target_deg: float | None = None,
+    pitch_weight: float | None = None,
     verbose: bool = True,
 ) -> dict[str, float]:
     """
@@ -100,13 +124,38 @@ def calculate_cost(
         if uprightness < TUMBLE_THRESHOLD:
             tumble_penalty += (1 - uprightness) * TUMBLE_PENALTY_SCALE
 
-    total_cost = VELOCITY_COST_WEIGHT * velocity_error + TUMBLE_COST_WEIGHT * tumble_penalty
+    # Pitch RMS amplitude (optional, detrended, in degrees)
+    pitch_vals = []
+    for state in trajectory:
+        if state["time"] < SETTLE_TIME:
+            continue
+        quat = state["quat"]
+        pitch = R.from_quat(quat, scalar_first=True).as_euler("xyz", degrees=False)[1]
+        pitch_vals.append(pitch)
+    pitch_rms_deg = 0.0
+    if pitch_vals:
+        pitch_vals = np.asarray(pitch_vals)
+        pitch_vals = pitch_vals - np.mean(pitch_vals)
+        pitch_rms_deg = np.sqrt(np.mean(pitch_vals ** 2)) * (180.0 / np.pi)
+
+    if pitch_target_deg is None:
+        pitch_target_deg = PITCH_RMS_TARGET_DEG
+    if pitch_weight is None:
+        pitch_weight = PITCH_RMS_WEIGHT
+    pitch_error = (pitch_rms_deg - pitch_target_deg) ** 2
+
+    total_cost = (
+        VELOCITY_COST_WEIGHT * velocity_error
+        + TUMBLE_COST_WEIGHT * tumble_penalty
+        + pitch_weight * pitch_error
+    )
 
     if verbose:
         print(
             f"    Avg Vel: {avg_forward_velocity:.3f} m/s | "
             f"Vel Err: {velocity_error:.4f} | "
             f"Tumble Pen: {tumble_penalty:.4f} | "
+            f"Pitch RMS: {pitch_rms_deg:.2f} deg | "
             f"Total Cost: {total_cost:.4f}"
         )
 
@@ -114,6 +163,7 @@ def calculate_cost(
         "total_cost": total_cost,
         "avg_forward_velocity": avg_forward_velocity,
         "tumble_penalty": tumble_penalty,
+        "pitch_rms_deg": pitch_rms_deg,
     }
 
 
@@ -123,36 +173,66 @@ def calculate_cost(
 
 def _evaluate_one_scene(args):
     """
-    Run one scene for one point. Used by 1-scene-per-process pool.
+    Run one trial for one (point, reference row). Used by process pool.
 
-    args: (point_index, point, scene_name, mjcf_path)
-    Returns: (point_index, scene_name, cost, velocity, tumble, wall_time)
+    args: (point_index, point, ref_row, trial_index, show_progress)
+    Returns: (point_index, ref_id, scene_name, cost, velocity, tumble, pitch_rms, weight, wall_time)
     """
-    point_index, point, scene_name, mjcf_path = args
+    point_index, point, ref_row, trial_index, show_progress = args
 
     # Lazy import in subprocess (separate memory space)
     import simulation as _sim
     from config import sim_params_from_point as _sim_params_from_point
 
     sim_params = _sim_params_from_point(point)
-    target_velocity = TARGET_VELOCITIES[scene_name]
-    t0 = time.perf_counter()
-    trajectory = _sim.run_simulation(
-        sim_params, mjcf_path=mjcf_path, sim_duration=SIM_DURATION, visualize=False
-    )
-    wall_time = time.perf_counter() - t0
+    scene_name = ref_row["scene"]
+    mjcf_path = MJCF_PATHS[scene_name]
+    target_velocity = ref_row["speed"]
+    pitch_target_deg = ref_row.get("pitch_amp_deg", PITCH_RMS_TARGET_DEG)
+    pitch_weight = ref_row.get("pitch_weight", PITCH_RMS_WEIGHT)
+    weight = ref_row.get("weight", 1.0)
+    sim_params["drive_freq"] = ref_row.get("ctrl_freq", DEFAULT_CTRL_FREQ)
 
+    # Deterministic jitter seeds (stable across processes).
+    ref_idx = sum(ord(c) for c in ref_row["id"]) % 1000
+    t0 = time.perf_counter()
+    seed = INIT_JITTER_SEED + 100000 * point_index + 1000 * ref_idx + trial_index
+    trajectory = _sim.run_simulation(
+        sim_params,
+        mjcf_path=mjcf_path,
+        sim_duration=SIM_DURATION,
+        visualize=False,
+        progress=show_progress,
+        init_yaw_jitter_deg=INIT_YAW_JITTER_DEG,
+        rng_seed=seed,
+    )
     if trajectory is None:
-        cost_data = {"total_cost": COST_FAILURE, "avg_forward_velocity": 0.0, "tumble_penalty": 0.0}
+        cost_data = {
+            "total_cost": COST_FAILURE,
+            "avg_forward_velocity": 0.0,
+            "tumble_penalty": 0.0,
+            "pitch_rms_deg": 0.0,
+        }
     else:
-        cost_data = calculate_cost(trajectory, target_velocity, verbose=False)
+        cost_data = calculate_cost(
+            trajectory,
+            target_velocity,
+            pitch_target_deg=pitch_target_deg,
+            pitch_weight=pitch_weight,
+            verbose=False,
+        )
+
+    wall_time = time.perf_counter() - t0
 
     return (
         point_index,
+        ref_row["id"],
         scene_name,
         cost_data["total_cost"],
         cost_data["avg_forward_velocity"],
         cost_data.get("tumble_penalty", 0.0),
+        cost_data.get("pitch_rms_deg", 0.0),
+        weight,
         wall_time,
     )
 
@@ -162,29 +242,93 @@ def _evaluate_one_scene(args):
 # ---------------------------------------------------------------------------
 
 def _aggregate_scene_results(points: list, scene_results: list) -> list[dict]:
-    """Turn list of per-scene results into list of full result dicts (one per point)."""
+    """Turn list of per-trial results into full result dicts (one per point)."""
     by_point = defaultdict(
-        lambda: {"scene_costs": {}, "scene_avg_velocities": {}, "scene_tumble": {}, "scene_wall_times": []}
+        lambda: {
+            "ref_trials_costs": defaultdict(list),
+            "ref_trials_velocities": defaultdict(list),
+            "ref_trials_tumble": defaultdict(list),
+            "ref_trials_pitch_rms": defaultdict(list),
+            "ref_weights": {},
+            "ref_scene": {},
+            "scene_costs": defaultdict(float),
+            "scene_vel_num": defaultdict(float),
+            "scene_tumble_num": defaultdict(float),
+            "scene_weight": defaultdict(float),
+            "scene_wall_times": [],
+        }
     )
-    for point_index, scene_name, cost, velocity, tumble, wall_time in scene_results:
-        by_point[point_index]["scene_costs"][scene_name] = cost
-        by_point[point_index]["scene_avg_velocities"][scene_name] = velocity
-        by_point[point_index]["scene_tumble"][scene_name] = tumble
-        by_point[point_index]["scene_wall_times"].append(wall_time)
+    for (
+        point_index,
+        ref_id,
+        scene_name,
+        cost,
+        velocity,
+        tumble,
+        pitch_rms,
+        weight,
+        wall_time,
+    ) in scene_results:
+        d = by_point[point_index]
+        d["ref_trials_costs"][ref_id].append(cost)
+        d["ref_trials_velocities"][ref_id].append(velocity)
+        d["ref_trials_tumble"][ref_id].append(tumble)
+        d["ref_trials_pitch_rms"][ref_id].append(pitch_rms)
+        d["ref_weights"][ref_id] = weight
+        d["ref_scene"][ref_id] = scene_name
+        d["scene_wall_times"].append(wall_time)
 
     results = []
     for point_index in sorted(by_point):
         d = by_point[point_index]
         params = point_to_params(points[point_index])
-        total_cost = sum(d["scene_costs"].values())
+        ref_costs = {}
+        ref_avg_velocities = {}
+        ref_tumble = {}
+        ref_pitch_rms = {}
+
+        for ref_id, trials in d["ref_trials_costs"].items():
+            scene = d["ref_scene"][ref_id]
+            weight = d["ref_weights"][ref_id]
+            mean_cost = float(np.mean(trials))
+            mean_vel = float(np.mean(d["ref_trials_velocities"][ref_id]))
+            mean_tumble = float(np.mean(d["ref_trials_tumble"][ref_id]))
+            mean_pitch = float(np.mean(d["ref_trials_pitch_rms"][ref_id]))
+
+            ref_costs[ref_id] = mean_cost
+            ref_avg_velocities[ref_id] = mean_vel
+            ref_tumble[ref_id] = mean_tumble
+            ref_pitch_rms[ref_id] = mean_pitch
+
+            d["scene_costs"][scene] += weight * mean_cost
+            d["scene_vel_num"][scene] += weight * mean_vel
+            d["scene_tumble_num"][scene] += weight * mean_tumble
+            d["scene_weight"][scene] += weight
+
+        scene_avg_velocities = {
+            s: (d["scene_vel_num"][s] / d["scene_weight"][s] if d["scene_weight"][s] > 0 else 0.0)
+            for s in MJCF_PATHS
+        }
+        scene_tumble = {
+            s: (d["scene_tumble_num"][s] / d["scene_weight"][s] if d["scene_weight"][s] > 0 else 0.0)
+            for s in MJCF_PATHS
+        }
+        scene_costs = dict(d["scene_costs"])
+        total_cost = sum(scene_costs.values())
         point_wall = max(d["scene_wall_times"]) if d["scene_wall_times"] else 0.0
         results.append({
             "id": str(uuid.uuid4().hex)[:8],
             "cost": total_cost,
             "params": params,
-            "scene_costs": d["scene_costs"],
-            "scene_avg_velocities": d["scene_avg_velocities"],
-            "scene_tumble": d["scene_tumble"],
+            "scene_costs": scene_costs,
+            "scene_avg_velocities": scene_avg_velocities,
+            "scene_tumble": scene_tumble,
+            "ref_costs": ref_costs,
+            "ref_avg_velocities": ref_avg_velocities,
+            "ref_tumble": ref_tumble,
+            "ref_pitch_rms": ref_pitch_rms,
+            "ref_weights": d["ref_weights"],
+            "ref_scene": d["ref_scene"],
             "wall_time": point_wall,
         })
     return results
@@ -200,6 +344,9 @@ def _append_result_to_csv(res: dict[str, Any]) -> None:
     for scene in MJCF_PATHS:
         row[f"velocity_{scene}"] = res["scene_avg_velocities"].get(scene, 0)
         row[f"cost_{scene}"] = res["scene_costs"].get(scene, 0)
+    for rid in reference_ids():
+        row[f"velocity_{rid}"] = res["ref_avg_velocities"].get(rid, 0)
+        row[f"cost_{rid}"] = res["ref_costs"].get(rid, 0)
     row.update(res["params"])
     try:
         with open(CSV_PATH, "a", newline="") as f:
@@ -219,7 +366,7 @@ def _print_point_results(results: list[dict], n_this: int) -> None:
         sav = r["scene_avg_velocities"]
         st = r.get("scene_tumble", {})
         residuals_cm_s = " | ".join(
-            f"{s}: {(sav.get(s, 0) - TARGET_VELOCITIES[s]) * 100:+.1f} cm/s"
+            f"{s}: {(sav.get(s, 0) - _SCENE_TARGETS.get(s, 0.0)) * 100:+.1f} cm/s"
             for s in MJCF_PATHS
         )
         tumbles = " | ".join(f"{s}: {st.get(s, 0.0):.4f}" for s in MJCF_PATHS)
@@ -233,7 +380,7 @@ def _print_best_so_far(all_results: list[dict], n_done: int) -> None:
     sav = best["scene_avg_velocities"]
     st = best.get("scene_tumble", {})
     res_str = " | ".join(
-        f"{s}: {(sav.get(s, 0) - TARGET_VELOCITIES[s]) * 100:+.1f} cm/s"
+        f"{s}: {(sav.get(s, 0) - _SCENE_TARGETS.get(s, 0.0)) * 100:+.1f} cm/s"
         for s in MJCF_PATHS
     )
     tum_str = " | ".join(f"{s}: {st.get(s, 0.0):.4f}" for s in MJCF_PATHS)
@@ -246,7 +393,7 @@ def _print_best_so_far(all_results: list[dict], n_done: int) -> None:
 
 def _run_batch_optimization(all_results: list[dict], pool: multiprocessing.Pool) -> OptResult:
     """
-    Batch Bayesian optimization: propose BATCH_SIZE points, evaluate all scenes
+    Batch Bayesian optimization: propose BATCH_SIZE points, evaluate all references
     in parallel, tell optimizer the costs, repeat.
 
     Args:
@@ -261,33 +408,12 @@ def _run_batch_optimization(all_results: list[dict], pool: multiprocessing.Pool)
     )
     n_done = 0
 
-    # Optional seed from older optimization
-    if SEED_FROM_OLD_CSV:
-        print("\n--- Seed from old CSV (optimization_results.csv abe1b74c, fudges=1, damping=7e-10) ---")
-        scene_results = [
-            _evaluate_one_scene((0, SEED_POINT, sn, path))
-            for sn, path in MJCF_PATHS.items()
-        ]
-        seed_results = _aggregate_scene_results([SEED_POINT], scene_results)
-        seed_result = seed_results[0]
-        optimizer.tell([SEED_POINT], [seed_result["cost"]])
-        all_results.append(seed_result)
-        _append_result_to_csv(seed_result)
-        n_done = 1
-        sav = seed_result["scene_avg_velocities"]
-        st = seed_result.get("scene_tumble", {})
-        res_str = " | ".join(
-            f"{s}: {(sav.get(s, 0) - TARGET_VELOCITIES[s]) * 100:+.1f} cm/s"
-            for s in MJCF_PATHS
-        )
-        tum_str = " | ".join(f"{s}: {st.get(s, 0.0):.4f}" for s in MJCF_PATHS)
-        print(f"  Seed cost={seed_result['cost']:.6f} | residual: {res_str} | tumble: {tum_str} | id={seed_result['id']}\n")
-
     batch_num = 0
     while n_done < N_CALLS:
         n_this = min(BATCH_SIZE, N_CALLS - n_done)
         batch_num += 1
-        print(f"\n--- Batch {batch_num}: asking for {n_this} points ({n_done + 1}\u2013{n_done + n_this} / {N_CALLS}), {n_this * NUM_SCENES} scene tasks ---")
+        n_trials = max(1, INIT_JITTER_TRIALS)
+        print(f"\n--- Batch {batch_num}: asking for {n_this} points ({n_done + 1}\u2013{n_done + n_this} / {N_CALLS}), {n_this * len(_REF_ROWS) * n_trials} tasks ---")
 
         t_ask = time.perf_counter()
         points = optimizer.ask(n_points=n_this)
@@ -295,14 +421,22 @@ def _run_batch_optimization(all_results: list[dict], pool: multiprocessing.Pool)
             points = [points]
         t_ask = time.perf_counter() - t_ask
 
-        # One scene per process: (point_index, point, scene_name, mjcf_path)
+        # One reference row per process: (point_index, point, ref_row)
         tasks = [
-            (i, point, scene_name, mjcf_path)
+            (
+                i,
+                point,
+                ref_row,
+                trial_idx,
+                (i == 0 and ref_idx == 0 and trial_idx == 0),
+            )
             for i, point in enumerate(points)
-            for scene_name, mjcf_path in MJCF_PATHS.items()
+            for ref_idx, ref_row in enumerate(_REF_ROWS)
+            for trial_idx in range(n_trials)
         ]
         t_sim = time.perf_counter()
-        scene_results = pool.map(_evaluate_one_scene, tasks)
+        # Queue-style scheduling to keep workers busy for heterogeneous task runtimes.
+        scene_results = list(pool.imap_unordered(_evaluate_one_scene, tasks, chunksize=1))
         t_sim = time.perf_counter() - t_sim
 
         t_agg = time.perf_counter()
@@ -352,7 +486,15 @@ def _run_batch_optimization(all_results: list[dict], pool: multiprocessing.Pool)
 
 if __name__ == "__main__":
     print(f"Running Bayesian optimization for {N_CALLS} evaluations in batches of {BATCH_SIZE}...")
-    print(f"Target velocities: {TARGET_VELOCITIES}")
+    print("Reference targets:")
+    for row in _REF_ROWS:
+        print(
+            f"  - {row['id']}: scene={row['scene']} | "
+            f"ctrl_freq={row['ctrl_freq']} Hz | "
+            f"speed={row['speed']} m/s | "
+            f"weight={row['weight']} | "
+            f"pitch_weight={row.get('pitch_weight', PITCH_RMS_WEIGHT)}"
+        )
 
     # Write CSV header once
     try:
@@ -371,7 +513,10 @@ if __name__ == "__main__":
     pool = None
 
     try:
-        pool = multiprocessing.Pool(processes=POOL_SIZE)
+        tasks_per_batch = BATCH_SIZE * len(_REF_ROWS)
+        pool_size = max(1, min(os.cpu_count() or 16, tasks_per_batch))
+        print(f"Worker pool size: {pool_size} (tasks per batch: {tasks_per_batch})")
+        pool = multiprocessing.Pool(processes=pool_size)
         result = _run_batch_optimization(all_results, pool)
     finally:
         if pool:
@@ -395,6 +540,10 @@ if __name__ == "__main__":
     import simulation as sim_module
 
     sorted_results = sorted(all_results, key=lambda r: r["cost"])
+    run_stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    replay_root = pathlib.Path("top_5_rollouts_multi") / run_stamp
+    replay_root.mkdir(parents=True, exist_ok=True)
+    print(f"Replay output root: {replay_root}")
 
     for i in range(min(5, len(sorted_results))):
         result_data = sorted_results[i]
@@ -408,13 +557,19 @@ if __name__ == "__main__":
             [result_data["params"][dim.name] for dim in space]
         )
 
-        video_dir = "top_5_rollouts_multi"
-        for scene, mjcf_path in MJCF_PATHS.items():
-            video_path = f"{video_dir}/rank_{rank}_{scene}_id_{result_data['id']}_cost_{result_data['cost']:.4f}.mp4"
-            print(f"  Recording video for {scene} to {video_path}...")
+        run_dir = replay_root / f"rank_{rank:02d}_id_{result_data['id']}"
+        run_dir.mkdir(parents=True, exist_ok=True)
+        for ref_row in _REF_ROWS:
+            scene = ref_row["scene"]
+            mjcf_path = MJCF_PATHS[scene]
+            ref_id = ref_row["id"]
+            video_path = run_dir / f"{ref_id}.mp4"
+            print(f"  Recording video for {ref_id} to {video_path}...")
+            sim_params_scene = dict(sim_params)
+            sim_params_scene["drive_freq"] = ref_row.get("ctrl_freq", DEFAULT_CTRL_FREQ)
             sim_module.run_simulation(
-                sim_params,
+                sim_params_scene,
                 mjcf_path=mjcf_path,
                 sim_duration=10.0,
-                record_path=video_path,
+                record_path=str(video_path),
             )
