@@ -23,10 +23,10 @@ SIM_TIMESTEP = 1.0 / 2000.0  # MuJoCo timestep (2 kHz)
 
 # Initial robot pose
 INITIAL_Z_HEIGHT = 0.002  # meters above ground
-INITIAL_QUATERNION = (0, 0, 1, 0)  # 180° rotation about z-axis (w, x, y, z)
+INITIAL_QUATERNION = (0, 0, 1, 0)  # 180° rotation about y-axis (w, x, y, z)
 INITIAL_LEG_ANGLES = np.pi  # all legs start at π radians
-INIT_YAW_JITTER_DEG = 0  # max +/- yaw jitter (deg) applied at init; 0 = off
-INIT_JITTER_TRIALS = 1  # number of jittered trials per point (>=1)
+INIT_YAW_JITTER_DEG = 2  # max +/- yaw jitter (deg) applied at init; 0 = off
+INIT_JITTER_TRIALS = 3  # number of jittered trials per point (>=1)
 INIT_JITTER_SEED = 12345  # base seed for deterministic jitter
 
 # Body indexing: leg bodies are offset from leg index (0-3) by this amount
@@ -51,19 +51,13 @@ MAGNETIC_FIELD_MAGNITUDE = 2e-3
 # ---------------------------------------------------------------------------
 # Scene configuration
 # ---------------------------------------------------------------------------
-TARGET_VELOCITIES: dict[str, float] = {
-    # "scene4": 0.21,  # 21 cm/s for 4-legged robot
-    # "scene2": 0.14,  # 14 cm/s for 2-legged robot
-    "scene4": 0.0,  # 21 cm/s for 4-legged robot
-    "scene2": 0.0,  # 14 cm/s for 2-legged robot
-}
 MJCF_PATHS: dict[str, str] = {
     "scene4": str(PACKAGE_DIR / "multi_milli_quad" / "scene_4.xml"),
     "scene2": str(PACKAGE_DIR / "multi_milli_quad" / "scene_2.xml"),
 }
 DEFAULT_CTRL_FREQ = 30.0  # Hz when no per-row control frequency is provided
 
-# Optional reference dataset for optimization. If empty, falls back to TARGET_VELOCITIES.
+# Reference dataset for optimization.
 # Fields:
 #   id (optional): stable unique key for CSV columns and replay filenames
 #   scene (required): key in MJCF_PATHS
@@ -81,23 +75,24 @@ REFERENCE_DATA: list[dict[str, Any]] = [
 # Optimization hyper-parameters
 # ---------------------------------------------------------------------------
 N_CALLS = 200  # total optimization iterations
-SIM_DURATION = 3.0  # seconds per simulation run
-SIMULATION_TIMEOUT = 20  # wall-clock seconds per worker
+SIM_DURATION = 5.0  # seconds per simulation run
+SIMULATION_TIMEOUT = 35  # wall-clock seconds per worker
 ROLLOUTS_PER_SCENE = 1  # sims per scene per iteration (>1 only for noisy sims)
 BATCH_SIZE = 8  # points proposed per optimizer step
 VERBOSE_BATCH = True
 PROFILE_BATCH = True
 # "rf" = random forest (fast ask/tell); "gp" = Gaussian process (slow at high n)
-BASE_ESTIMATOR = "gp"
+BASE_ESTIMATOR = "rf"
 
 # ---------------------------------------------------------------------------
 # Cost-function constants
 # ---------------------------------------------------------------------------
-TUMBLE_THRESHOLD = 0.3  # cos(angle) below this → "tumbling" (~72.5° from vertical)
+TUMBLE_THRESHOLD = 0.0  # cos(angle) below this → "tumbling" (90° = past horizontal)
 TUMBLE_PENALTY_SCALE = 0.1  # per-frame penalty when uprightness < threshold
 COST_FAILURE = 1e6  # cost for failed / empty trajectory
-VELOCITY_COST_WEIGHT = 1.0
+VELOCITY_COST_WEIGHT = 5.0
 TUMBLE_COST_WEIGHT = 1.0
+LATERAL_COST_WEIGHT = 1.0  # penalizes lateral (y) displacement squared
 PITCH_RMS_TARGET_DEG = 0.0  # target RMS pitch (deg); set when you have reference
 PITCH_RMS_WEIGHT = 0.0  # set >0 to include RMS pitch in objective
 
@@ -133,44 +128,30 @@ def _make_ref_id(scene: str, ctrl_freq: float) -> str:
 
 
 def reference_rows() -> list[dict[str, Any]]:
-    """Return reference rows for optimization (fallback to TARGET_VELOCITIES)."""
-    if REFERENCE_DATA:
-        rows = []
-        seen_ids = set()
-        for row in REFERENCE_DATA:
-            scene = row["scene"]
-            ctrl_freq = float(row.get("ctrl_freq", DEFAULT_CTRL_FREQ))
-            speed = float(row["speed"])
-            weight = float(row.get("weight", 1.0))
-            pitch_amp_deg = row.get("pitch_amp_deg", None)
-            pitch_weight = float(row.get("pitch_weight", PITCH_RMS_WEIGHT))
-            ref_id = str(row.get("id", _make_ref_id(scene, ctrl_freq)))
-            if ref_id in seen_ids:
-                raise ValueError(f"Duplicate reference id '{ref_id}' in REFERENCE_DATA")
-            seen_ids.add(ref_id)
-            rows.append({
-                "id": ref_id,
-                "scene": scene,
-                "ctrl_freq": ctrl_freq,
-                "speed": speed,
-                "pitch_amp_deg": pitch_amp_deg,
-                "pitch_weight": pitch_weight,
-                "weight": weight,
-            })
-        return rows
-
-    return [
-        {
-            "id": _make_ref_id(scene, DEFAULT_CTRL_FREQ),
+    """Return reference rows for optimization from REFERENCE_DATA."""
+    rows = []
+    seen_ids = set()
+    for row in REFERENCE_DATA:
+        scene = row["scene"]
+        ctrl_freq = float(row.get("ctrl_freq", DEFAULT_CTRL_FREQ))
+        speed = float(row["speed"])
+        weight = float(row.get("weight", 1.0))
+        pitch_amp_deg = row.get("pitch_amp_deg", None)
+        pitch_weight = float(row.get("pitch_weight", PITCH_RMS_WEIGHT))
+        ref_id = str(row.get("id", _make_ref_id(scene, ctrl_freq)))
+        if ref_id in seen_ids:
+            raise ValueError(f"Duplicate reference id '{ref_id}' in REFERENCE_DATA")
+        seen_ids.add(ref_id)
+        rows.append({
+            "id": ref_id,
             "scene": scene,
-            "ctrl_freq": DEFAULT_CTRL_FREQ,
+            "ctrl_freq": ctrl_freq,
             "speed": speed,
-            "pitch_amp_deg": None,
-            "pitch_weight": PITCH_RMS_WEIGHT,
-            "weight": 1.0,
-        }
-        for scene, speed in TARGET_VELOCITIES.items()
-    ]
+            "pitch_amp_deg": pitch_amp_deg,
+            "pitch_weight": pitch_weight,
+            "weight": weight,
+        })
+    return rows
 
 
 def reference_ids() -> list[str]:
