@@ -21,7 +21,13 @@ from config import (
     MJCF_PATHS,
     SETTLE_TIME,
 )
-import simulation
+import importlib
+
+# ---- Simulation module selector ----
+# Switch between vectorized (4.68x faster) and original (bit-exact) simulation.
+# Hot-swap: change to "simulation" to use original implementation.
+SIM_MODULE = "simulation_fast"
+_sim = importlib.import_module(SIM_MODULE)
 
 
 def _sim_params_from_csv_row(row: dict[str, str]) -> dict:
@@ -234,7 +240,7 @@ def main():
 
     if args.record:
         print(f"\nRecording rollout to {args.record}...")
-        traj = simulation.run_simulation(
+        traj = _sim.run_simulation(
             sim_params,
             mjcf_path=mjcf_path,
             sim_duration=10.0,
@@ -244,7 +250,7 @@ def main():
     else:
         # Headless run for metrics, then interactive for viewing
         print("\nRunning headless sim for COT analysis...")
-        traj = simulation.run_simulation(
+        traj = _sim.run_simulation(
             sim_params,
             mjcf_path=mjcf_path,
             sim_duration=10.0,
@@ -263,7 +269,7 @@ def main():
     # Launch interactive viewer after analysis (if not recording)
     if not args.record:
         print("\nLaunching viewer... (Press SPACE to play/pause)")
-        simulation.run_simulation(
+        _sim.run_simulation(
             sim_params,
             mjcf_path=mjcf_path,
             sim_duration=10.0,

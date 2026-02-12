@@ -13,7 +13,13 @@ import mujoco
 
 from config import CSV_PATH, MJCF_PATHS
 from visualize_rollout import _sim_params_from_csv_row, compute_locomotion_metrics
-import simulation
+import importlib
+
+# ---- Simulation module selector ----
+# Switch between vectorized (4.68x faster) and original (bit-exact) simulation.
+# Hot-swap: change to "simulation" to use original implementation.
+SIM_MODULE = "simulation_fast"
+_sim = importlib.import_module(SIM_MODULE)
 
 
 def main():
@@ -66,7 +72,7 @@ def main():
             sim_num += 1
             print(f"\r  Running sim {sim_num}/{total_sims} (rank {rank}, {scene})...", end="", flush=True)
             mjcf_path = MJCF_PATHS[scene]
-            traj = simulation.run_simulation(
+            traj = _sim.run_simulation(
                 sim_params,
                 mjcf_path=mjcf_path,
                 sim_duration=args.duration,

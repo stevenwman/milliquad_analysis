@@ -34,6 +34,7 @@ from config import (
     MJCF_PATHS,
     N_CALLS,
     PROFILE_BATCH,
+    SIMULATION_TIMEOUT,
     SETTLE_TIME,
     SIM_DURATION,
     DEFAULT_CTRL_FREQ,
@@ -45,12 +46,18 @@ from config import (
     TUMBLE_PENALTY_SCALE,
     TUMBLE_THRESHOLD,
     VELOCITY_COST_WEIGHT,
+    LATERAL_COST_WEIGHT,
     csv_fieldnames,
     point_to_params,
     sim_params_from_point,
     space,
     VERBOSE_BATCH,
 )
+
+# ---- Simulation module selector ----
+# Switch between vectorized (4.68x faster) and original (bit-exact) simulation.
+# Hot-swap: change to "simulation" to use original implementation.
+SIM_MODULE = "simulation_fast"
 
 
 class OptResult(NamedTuple):
@@ -59,10 +66,9 @@ class OptResult(NamedTuple):
     x: list[float]  # best point (in space order)
 
 
-# Reference rows derived from config (falls back to TARGET_VELOCITIES in config.py)
 _REF_ROWS = reference_rows()
 if not _REF_ROWS:
-    raise ValueError("No reference rows defined. Set TARGET_VELOCITIES or REFERENCE_DATA.")
+    raise ValueError("No reference rows defined. Populate REFERENCE_DATA in config.py.")
 _SCENE_TARGETS = {}
 for _row in _REF_ROWS:
     _scene = _row["scene"]
@@ -79,8 +85,10 @@ _SCENE_TARGETS = {
 # Cost function
 # ---------------------------------------------------------------------------
 
-# Unit vector for uprightness check (world Z-axis)
-_UP_VECTOR = np.array([0.0, 0.0, 1.0])
+# Robot body-z points DOWN in normal operation (INITIAL_QUATERNION = 180° about y).
+# Uprightness = dot(body_z, nominal_down); +1 = normal, < threshold = flipped.
+_BODY_Z_LOCAL = np.array([0.0, 0.0, 1.0])
+_NOMINAL_BODY_Z_WORLD = np.array([0.0, 0.0, -1.0])
 
 
 def calculate_cost(
@@ -115,14 +123,23 @@ def calculate_cost(
 
     velocity_error = (avg_forward_velocity - target_velocity) ** 2
 
-    # Stability cost (tumbling penalty)
+    # Lateral displacement penalty (y-axis drift)
+    lateral_displacement = 0.0
+    if active_duration > 1e-6:
+        lateral_displacement = abs(final_state["pos"][1] - start_state["pos"][1])
+    lateral_error = lateral_displacement ** 2
+
+    # Stability cost (tumbling penalty, normalized to per-step average)
+    # Checks alignment of body-z with its nominal world direction (down).
+    # uprightness ≈ +1 during normal walking, drops toward -1 when flipped.
     tumble_penalty = 0.0
     for state in trajectory:
         quat = state["quat"]
-        body_z_axis = R.from_quat(quat, scalar_first=True).apply(_UP_VECTOR)
-        uprightness = np.dot(body_z_axis, _UP_VECTOR)
+        body_z_axis = R.from_quat(quat, scalar_first=True).apply(_BODY_Z_LOCAL)
+        uprightness = np.dot(body_z_axis, _NOMINAL_BODY_Z_WORLD)
         if uprightness < TUMBLE_THRESHOLD:
             tumble_penalty += (1 - uprightness) * TUMBLE_PENALTY_SCALE
+    tumble_penalty /= max(len(trajectory), 1)
 
     # Pitch RMS amplitude (optional, detrended, in degrees)
     pitch_vals = []
@@ -147,6 +164,7 @@ def calculate_cost(
     total_cost = (
         VELOCITY_COST_WEIGHT * velocity_error
         + TUMBLE_COST_WEIGHT * tumble_penalty
+        + LATERAL_COST_WEIGHT * lateral_error
         + pitch_weight * pitch_error
     )
 
@@ -154,6 +172,7 @@ def calculate_cost(
         print(
             f"    Avg Vel: {avg_forward_velocity:.3f} m/s | "
             f"Vel Err: {velocity_error:.4f} | "
+            f"Lateral: {lateral_displacement:.4f} m | "
             f"Tumble Pen: {tumble_penalty:.4f} | "
             f"Pitch RMS: {pitch_rms_deg:.2f} deg | "
             f"Total Cost: {total_cost:.4f}"
@@ -162,6 +181,7 @@ def calculate_cost(
     return {
         "total_cost": total_cost,
         "avg_forward_velocity": avg_forward_velocity,
+        "lateral_displacement": lateral_displacement,
         "tumble_penalty": tumble_penalty,
         "pitch_rms_deg": pitch_rms_deg,
     }
@@ -176,12 +196,13 @@ def _evaluate_one_scene(args):
     Run one trial for one (point, reference row). Used by process pool.
 
     args: (point_index, point, ref_row, trial_index, show_progress)
-    Returns: (point_index, ref_id, scene_name, cost, velocity, tumble, pitch_rms, weight, wall_time)
+    Returns: (point_index, ref_id, scene_name, cost, velocity, tumble, pitch_rms, lateral, weight, wall_time)
     """
     point_index, point, ref_row, trial_index, show_progress = args
 
     # Lazy import in subprocess (separate memory space)
-    import simulation as _sim
+    import importlib
+    _sim = importlib.import_module(SIM_MODULE)
     from config import sim_params_from_point as _sim_params_from_point
 
     sim_params = _sim_params_from_point(point)
@@ -203,6 +224,7 @@ def _evaluate_one_scene(args):
         sim_duration=SIM_DURATION,
         visualize=False,
         progress=show_progress,
+        wall_timeout=SIMULATION_TIMEOUT,
         init_yaw_jitter_deg=INIT_YAW_JITTER_DEG,
         rng_seed=seed,
     )
@@ -212,6 +234,7 @@ def _evaluate_one_scene(args):
             "avg_forward_velocity": 0.0,
             "tumble_penalty": 0.0,
             "pitch_rms_deg": 0.0,
+            "lateral_displacement": 0.0,
         }
     else:
         cost_data = calculate_cost(
@@ -232,6 +255,7 @@ def _evaluate_one_scene(args):
         cost_data["avg_forward_velocity"],
         cost_data.get("tumble_penalty", 0.0),
         cost_data.get("pitch_rms_deg", 0.0),
+        cost_data.get("lateral_displacement", 0.0),
         weight,
         wall_time,
     )
@@ -249,13 +273,16 @@ def _aggregate_scene_results(points: list, scene_results: list) -> list[dict]:
             "ref_trials_velocities": defaultdict(list),
             "ref_trials_tumble": defaultdict(list),
             "ref_trials_pitch_rms": defaultdict(list),
+            "ref_trials_lateral": defaultdict(list),
             "ref_weights": {},
             "ref_scene": {},
             "scene_costs": defaultdict(float),
             "scene_vel_num": defaultdict(float),
             "scene_tumble_num": defaultdict(float),
+            "scene_lateral_num": defaultdict(float),
             "scene_weight": defaultdict(float),
             "scene_wall_times": [],
+            "has_failure": False,
         }
     )
     for (
@@ -266,6 +293,7 @@ def _aggregate_scene_results(points: list, scene_results: list) -> list[dict]:
         velocity,
         tumble,
         pitch_rms,
+        lateral,
         weight,
         wall_time,
     ) in scene_results:
@@ -274,6 +302,9 @@ def _aggregate_scene_results(points: list, scene_results: list) -> list[dict]:
         d["ref_trials_velocities"][ref_id].append(velocity)
         d["ref_trials_tumble"][ref_id].append(tumble)
         d["ref_trials_pitch_rms"][ref_id].append(pitch_rms)
+        d["ref_trials_lateral"][ref_id].append(lateral)
+        if cost >= COST_FAILURE:
+            d["has_failure"] = True
         d["ref_weights"][ref_id] = weight
         d["ref_scene"][ref_id] = scene_name
         d["scene_wall_times"].append(wall_time)
@@ -286,6 +317,7 @@ def _aggregate_scene_results(points: list, scene_results: list) -> list[dict]:
         ref_avg_velocities = {}
         ref_tumble = {}
         ref_pitch_rms = {}
+        ref_lateral = {}
 
         for ref_id, trials in d["ref_trials_costs"].items():
             scene = d["ref_scene"][ref_id]
@@ -294,15 +326,18 @@ def _aggregate_scene_results(points: list, scene_results: list) -> list[dict]:
             mean_vel = float(np.mean(d["ref_trials_velocities"][ref_id]))
             mean_tumble = float(np.mean(d["ref_trials_tumble"][ref_id]))
             mean_pitch = float(np.mean(d["ref_trials_pitch_rms"][ref_id]))
+            mean_lateral = float(np.mean(d["ref_trials_lateral"][ref_id]))
 
             ref_costs[ref_id] = mean_cost
             ref_avg_velocities[ref_id] = mean_vel
             ref_tumble[ref_id] = mean_tumble
             ref_pitch_rms[ref_id] = mean_pitch
+            ref_lateral[ref_id] = mean_lateral
 
             d["scene_costs"][scene] += weight * mean_cost
             d["scene_vel_num"][scene] += weight * mean_vel
             d["scene_tumble_num"][scene] += weight * mean_tumble
+            d["scene_lateral_num"][scene] += weight * mean_lateral
             d["scene_weight"][scene] += weight
 
         scene_avg_velocities = {
@@ -313,8 +348,12 @@ def _aggregate_scene_results(points: list, scene_results: list) -> list[dict]:
             s: (d["scene_tumble_num"][s] / d["scene_weight"][s] if d["scene_weight"][s] > 0 else 0.0)
             for s in MJCF_PATHS
         }
+        scene_lateral = {
+            s: (d["scene_lateral_num"][s] / d["scene_weight"][s] if d["scene_weight"][s] > 0 else 0.0)
+            for s in MJCF_PATHS
+        }
         scene_costs = dict(d["scene_costs"])
-        total_cost = sum(scene_costs.values())
+        total_cost = COST_FAILURE if d["has_failure"] else sum(scene_costs.values())
         point_wall = max(d["scene_wall_times"]) if d["scene_wall_times"] else 0.0
         results.append({
             "id": str(uuid.uuid4().hex)[:8],
@@ -323,10 +362,12 @@ def _aggregate_scene_results(points: list, scene_results: list) -> list[dict]:
             "scene_costs": scene_costs,
             "scene_avg_velocities": scene_avg_velocities,
             "scene_tumble": scene_tumble,
+            "scene_lateral": scene_lateral,
             "ref_costs": ref_costs,
             "ref_avg_velocities": ref_avg_velocities,
             "ref_tumble": ref_tumble,
             "ref_pitch_rms": ref_pitch_rms,
+            "ref_lateral": ref_lateral,
             "ref_weights": d["ref_weights"],
             "ref_scene": d["ref_scene"],
             "wall_time": point_wall,
@@ -361,17 +402,25 @@ def _append_result_to_csv(res: dict[str, Any]) -> None:
 # ---------------------------------------------------------------------------
 
 def _print_point_results(results: list[dict], n_this: int) -> None:
-    """Print per-point cost/residual/tumble for one batch."""
+    """Print per-point cost/residual/tumble/lateral/pitch for one batch."""
     for i, r in enumerate(results):
         sav = r["scene_avg_velocities"]
         st = r.get("scene_tumble", {})
+        sl = r.get("scene_lateral", {})
+        rp = r.get("ref_pitch_rms", {})
         residuals_cm_s = " | ".join(
             f"{s}: {(sav.get(s, 0) - _SCENE_TARGETS.get(s, 0.0)) * 100:+.1f} cm/s"
             for s in MJCF_PATHS
         )
         tumbles = " | ".join(f"{s}: {st.get(s, 0.0):.4f}" for s in MJCF_PATHS)
+        laterals = " | ".join(f"{s}: {sl.get(s, 0.0)*100:.1f} cm" for s in MJCF_PATHS)
+        pitches = " | ".join(f"{rid}: {rp.get(rid, 0.0):.1f}°" for rid in rp)
         wt = r.get("wall_time", 0)
-        print(f"    [{i+1}/{n_this}] cost={r['cost']:.4f} | residual: {residuals_cm_s} | tumble: {tumbles} | time: {wt:.1f}s")
+        print(
+            f"    [{i+1}/{n_this}] id={r['id']} cost={r['cost']:.4f} | "
+            f"residual: {residuals_cm_s} | tumble: {tumbles} | "
+            f"lateral: {laterals} | pitch: {pitches} | time: {wt:.1f}s"
+        )
 
 
 def _print_best_so_far(all_results: list[dict], n_done: int) -> None:
@@ -379,12 +428,20 @@ def _print_best_so_far(all_results: list[dict], n_done: int) -> None:
     best = min(all_results, key=lambda r: r["cost"])
     sav = best["scene_avg_velocities"]
     st = best.get("scene_tumble", {})
+    sl = best.get("scene_lateral", {})
+    rp = best.get("ref_pitch_rms", {})
     res_str = " | ".join(
         f"{s}: {(sav.get(s, 0) - _SCENE_TARGETS.get(s, 0.0)) * 100:+.1f} cm/s"
         for s in MJCF_PATHS
     )
     tum_str = " | ".join(f"{s}: {st.get(s, 0.0):.4f}" for s in MJCF_PATHS)
-    print(f"  Best so far (n={n_done}): cost={best['cost']:.6f} | residual: {res_str} | tumble: {tum_str} | id={best['id']}")
+    lat_str = " | ".join(f"{s}: {sl.get(s, 0.0)*100:.1f} cm" for s in MJCF_PATHS)
+    pit_str = " | ".join(f"{rid}: {rp.get(rid, 0.0):.1f}°" for rid in rp)
+    print(
+        f"  Best so far (n={n_done}): cost={best['cost']:.6f} | "
+        f"residual: {res_str} | tumble: {tum_str} | "
+        f"lateral: {lat_str} | pitch: {pit_str} | id={best['id']}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -413,6 +470,7 @@ def _run_batch_optimization(all_results: list[dict], pool: multiprocessing.Pool)
         n_this = min(BATCH_SIZE, N_CALLS - n_done)
         batch_num += 1
         n_trials = max(1, INIT_JITTER_TRIALS)
+        t_batch_start = time.perf_counter()
         print(f"\n--- Batch {batch_num}: asking for {n_this} points ({n_done + 1}\u2013{n_done + n_this} / {N_CALLS}), {n_this * len(_REF_ROWS) * n_trials} tasks ---")
 
         t_ask = time.perf_counter()
@@ -462,8 +520,10 @@ def _run_batch_optimization(all_results: list[dict], pool: multiprocessing.Pool)
             _print_point_results(results, n_this)
             t_verbose = time.perf_counter() - t_verbose
 
-        batch_wall = t_ask + t_sim + t_agg + t_tell + t_csv + t_verbose
-        print(f"  Batch wall: {batch_wall:.1f}s | Costs: min={min(costs):.4f}, max={max(costs):.4f}")
+        batch_wall_actual = time.perf_counter() - t_batch_start
+        batch_wall_sum = t_ask + t_sim + t_agg + t_tell + t_csv + t_verbose
+        overhead = batch_wall_actual - batch_wall_sum
+        print(f"  Batch wall: {batch_wall_actual:.1f}s (profiled: {batch_wall_sum:.1f}s, overhead: {overhead:.2f}s) | Costs: min={min(costs):.4f}, max={max(costs):.4f}")
 
         if PROFILE_BATCH:
             parts = f"ask={t_ask:.3f}s sim={t_sim:.2f}s agg={t_agg:.3f}s tell={t_tell:.3f}s csv={t_csv:.3f}s"
@@ -513,7 +573,8 @@ if __name__ == "__main__":
     pool = None
 
     try:
-        tasks_per_batch = BATCH_SIZE * len(_REF_ROWS)
+        n_trials = max(1, INIT_JITTER_TRIALS)
+        tasks_per_batch = BATCH_SIZE * len(_REF_ROWS) * n_trials
         pool_size = max(1, min(os.cpu_count() or 16, tasks_per_batch))
         print(f"Worker pool size: {pool_size} (tasks per batch: {tasks_per_batch})")
         pool = multiprocessing.Pool(processes=pool_size)
@@ -537,7 +598,8 @@ if __name__ == "__main__":
 
     # Record top 5 rollouts
     print("\n--- Recording Top 5 Best Rollouts ---")
-    import simulation as sim_module
+    import importlib
+    sim_module = importlib.import_module(SIM_MODULE)
 
     sorted_results = sorted(all_results, key=lambda r: r["cost"])
     run_stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
