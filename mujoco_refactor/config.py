@@ -26,7 +26,7 @@ INITIAL_Z_HEIGHT = 0.002  # meters above ground
 INITIAL_QUATERNION = (0, 0, 1, 0)  # 180° rotation about y-axis (w, x, y, z)
 INITIAL_LEG_ANGLES = np.pi  # all legs start at π radians
 INIT_YAW_JITTER_DEG = 2  # max +/- yaw jitter (deg) applied at init; 0 = off
-INIT_JITTER_TRIALS = 3  # number of jittered trials per point (>=1)
+INIT_JITTER_TRIALS = 2  # number of jittered trials per point (>=1)
 INIT_JITTER_SEED = 12345  # base seed for deterministic jitter
 
 # Body indexing: leg bodies are offset from leg index (0-3) by this amount
@@ -52,8 +52,10 @@ MAGNETIC_FIELD_MAGNITUDE = 2e-3
 # Scene configuration
 # ---------------------------------------------------------------------------
 MJCF_PATHS: dict[str, str] = {
-    "scene4": str(PACKAGE_DIR / "multi_milli_quad" / "scene_4.xml"),
+    "scene1": str(PACKAGE_DIR / "multi_milli_quad" / "scene_1.xml"),
     "scene2": str(PACKAGE_DIR / "multi_milli_quad" / "scene_2.xml"),
+    "scene4": str(PACKAGE_DIR / "multi_milli_quad" / "scene_4.xml"),
+    "scene_wheel": str(PACKAGE_DIR / "wheel_milli_quad" / "scene_wheel.xml"),
 }
 DEFAULT_CTRL_FREQ = 30.0  # Hz when no per-row control frequency is provided
 
@@ -67,15 +69,28 @@ DEFAULT_CTRL_FREQ = 30.0  # Hz when no per-row control frequency is provided
 #   pitch_weight (optional): per-row weight for pitch amplitude error term
 #   weight (optional): per-row multiplier on total row cost when aggregating
 REFERENCE_DATA: list[dict[str, Any]] = [
-    {"scene": "scene4", "ctrl_freq": 30.0, "speed": 0.21, "pitch_amp_deg": 25.0, "pitch_weight": 0.0, "weight": 1.0},
-    {"scene": "scene2", "ctrl_freq": 30.0, "speed": 0.14, "pitch_amp_deg": 25.0, "pitch_weight": 0.0, "weight": 1.0},
+    # Single leg (scene1)
+    {"scene": "scene1", "ctrl_freq": 10.0, "speed": 0.0512, "weight": 1.0},
+    {"scene": "scene1", "ctrl_freq": 30.0, "speed": 0.1187, "weight": 1.0},
+    {"scene": "scene1", "ctrl_freq": 50.0, "speed": 0.1483, "weight": 1.0},
+    # Double leg (scene2)
+    {"scene": "scene2", "ctrl_freq": 10.0, "speed": 0.0832, "weight": 1.0},
+    {"scene": "scene2", "ctrl_freq": 30.0, "speed": 0.1796, "weight": 1.0},
+    {"scene": "scene2", "ctrl_freq": 50.0, "speed": 0.2633, "weight": 1.0},
+    # Quad leg (scene4)
+    {"scene": "scene4", "ctrl_freq": 10.0, "speed": 0.1121, "weight": 1.0},
+    {"scene": "scene4", "ctrl_freq": 30.0, "speed": 0.2747, "weight": 1.0},
+    {"scene": "scene4", "ctrl_freq": 50.0, "speed": 0.3274, "weight": 1.0},
+    # Wheel (scene_wheel)
+    {"scene": "scene_wheel", "ctrl_freq": 10.0, "speed": 0.1432, "weight": 1.0},
+    {"scene": "scene_wheel", "ctrl_freq": 30.0, "speed": 0.4493, "weight": 1.0},
 ]
 
 # ---------------------------------------------------------------------------
 # Optimization hyper-parameters
 # ---------------------------------------------------------------------------
 N_CALLS = 200  # total optimization iterations
-SIM_DURATION = 5.0  # seconds per simulation run
+SIM_DURATION = 3.0  # seconds per simulation run
 SIMULATION_TIMEOUT = 35  # wall-clock seconds per worker
 ROLLOUTS_PER_SCENE = 1  # sims per scene per iteration (>1 only for noisy sims)
 BATCH_SIZE = 8  # points proposed per optimizer step
@@ -93,6 +108,7 @@ COST_FAILURE = 1e6  # cost for failed / empty trajectory
 VELOCITY_COST_WEIGHT = 5.0
 TUMBLE_COST_WEIGHT = 1.0
 LATERAL_COST_WEIGHT = 1.0  # penalizes lateral (y) displacement squared
+VELOCITY_VARIANCE_WEIGHT = 2.0  # penalizes uneven velocity errors across references
 PITCH_RMS_TARGET_DEG = 0.0  # target RMS pitch (deg); set when you have reference
 PITCH_RMS_WEIGHT = 0.0  # set >0 to include RMS pitch in objective
 
@@ -119,6 +135,7 @@ space: list[Real] = [
 # CSV output
 # ---------------------------------------------------------------------------
 CSV_PATH = "multi_optimization_results.csv"
+BEST_CSV_PATH = "optimization_bests.csv"
 
 
 def _make_ref_id(scene: str, ctrl_freq: float) -> str:

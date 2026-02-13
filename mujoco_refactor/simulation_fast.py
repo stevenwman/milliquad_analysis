@@ -19,6 +19,9 @@ import imageio
 import imageio.plugins.ffmpeg
 import mujoco
 import mujoco.viewer
+# Suppress MuJoCo's C-level "Nan, Inf or huge value" stderr warnings —
+# _check_instability already catches these conditions programmatically.
+mujoco.set_mju_user_warning(lambda msg: None)
 import numpy as np
 import pathlib
 from scipy.spatial.transform import Rotation as R
@@ -618,7 +621,6 @@ def run_simulation(
 
     except ValueError as e:
         if "Simulation unstable" in str(e) or "stuck in a loop" in str(e):
-            print(f"  Simulation failed gracefully: {e}")
             return None
         else:
             raise
@@ -630,7 +632,6 @@ def run_simulation(
         renderer.close()
 
     if not trajectory or not np.all(np.isfinite([d['pos'][0] for d in trajectory])):
-        print("Warning: Simulation produced NaN/Inf values or was empty. Penalizing.")
         return None
 
     return trajectory
