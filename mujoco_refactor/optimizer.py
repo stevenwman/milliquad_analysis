@@ -26,6 +26,7 @@ from skopt import Optimizer
 from config import (
     BASE_ESTIMATOR,
     BATCH_SIZE,
+    BEST_CSV_PATH,
     COST_FAILURE,
     CSV_PATH,
     INIT_JITTER_SEED,
@@ -46,6 +47,7 @@ from config import (
     TUMBLE_PENALTY_SCALE,
     TUMBLE_THRESHOLD,
     VELOCITY_COST_WEIGHT,
+    VELOCITY_VARIANCE_WEIGHT,
     LATERAL_COST_WEIGHT,
     csv_fieldnames,
     point_to_params,
@@ -353,7 +355,21 @@ def _aggregate_scene_results(points: list, scene_results: list) -> list[dict]:
             for s in MJCF_PATHS
         }
         scene_costs = dict(d["scene_costs"])
-        total_cost = COST_FAILURE if d["has_failure"] else sum(scene_costs.values())
+        if d["has_failure"]:
+            total_cost = COST_FAILURE
+        else:
+            total_cost = sum(scene_costs.values())
+            # Variance penalty: penalize uneven relative velocity errors across refs
+            if len(ref_avg_velocities) > 1:
+                ref_rows_local = reference_rows()
+                targets_by_id = {row["id"]: row["speed"] for row in ref_rows_local}
+                rel_errors = [
+                    (ref_avg_velocities[rid] - targets_by_id[rid]) / targets_by_id[rid]
+                    for rid in ref_avg_velocities
+                    if targets_by_id.get(rid, 0) > 0
+                ]
+                if len(rel_errors) > 1:
+                    total_cost += VELOCITY_VARIANCE_WEIGHT * float(np.var(rel_errors))
         point_wall = max(d["scene_wall_times"]) if d["scene_wall_times"] else 0.0
         results.append({
             "id": str(uuid.uuid4().hex)[:8],
@@ -402,46 +418,78 @@ def _append_result_to_csv(res: dict[str, Any]) -> None:
 # ---------------------------------------------------------------------------
 
 def _print_point_results(results: list[dict], n_this: int) -> None:
-    """Print per-point cost/residual/tumble/lateral/pitch for one batch."""
+    """Print per-point results as a compact table with one row per reference."""
+    ref_rows = reference_rows()
     for i, r in enumerate(results):
-        sav = r["scene_avg_velocities"]
-        st = r.get("scene_tumble", {})
-        sl = r.get("scene_lateral", {})
-        rp = r.get("ref_pitch_rms", {})
-        residuals_cm_s = " | ".join(
-            f"{s}: {(sav.get(s, 0) - _SCENE_TARGETS.get(s, 0.0)) * 100:+.1f} cm/s"
-            for s in MJCF_PATHS
-        )
-        tumbles = " | ".join(f"{s}: {st.get(s, 0.0):.4f}" for s in MJCF_PATHS)
-        laterals = " | ".join(f"{s}: {sl.get(s, 0.0)*100:.1f} cm" for s in MJCF_PATHS)
-        pitches = " | ".join(f"{rid}: {rp.get(rid, 0.0):.1f}°" for rid in rp)
         wt = r.get("wall_time", 0)
-        print(
-            f"    [{i+1}/{n_this}] id={r['id']} cost={r['cost']:.4f} | "
-            f"residual: {residuals_cm_s} | tumble: {tumbles} | "
-            f"lateral: {laterals} | pitch: {pitches} | time: {wt:.1f}s"
-        )
+        print(f"    [{i+1}/{n_this}] id={r['id']}  cost={r['cost']:.4f}  time={wt:.1f}s")
+        _print_ref_table(r, ref_rows, indent=6)
+
+
+def _print_ref_table(r: dict, ref_rows: list[dict], indent: int = 4) -> None:
+    """Print a compact table of per-reference-row results."""
+    rv = r.get("ref_avg_velocities", {})
+    rt = r.get("ref_tumble", {})
+    rp = r.get("ref_pitch_rms", {})
+    rl = r.get("ref_lateral", {})
+    pad = " " * indent
+    # Header
+    print(f"{pad}{'ref_id':<18} {'target':>7} {'sim':>7} {'Δvel':>9} {'tumble':>7} {'lateral':>8} {'pitch':>6}")
+    print(f"{pad}{'-'*66}")
+    for row in ref_rows:
+        rid = row["id"]
+        target = row["speed"]
+        sim_v = rv.get(rid, 0.0)
+        delta = (sim_v - target) * 100  # cm/s
+        tmb = rt.get(rid, 0.0)
+        lat = rl.get(rid, 0.0) * 100  # cm
+        pit = rp.get(rid, 0.0)
+        print(f"{pad}{rid:<18} {target:>6.3f}  {sim_v:>6.3f}  {delta:>+7.1f}cs  {tmb:>6.4f}  {lat:>6.1f}cm  {pit:>4.1f}°")
+
+
+_best_cost_so_far: float = float("inf")
+
+
+def _append_best_csv(best: dict, n_done: int) -> None:
+    """Append a new-best row to the running bests CSV."""
+    from datetime import datetime
+    ref_rows = reference_rows()
+    ref_ids = [row["id"] for row in ref_rows]
+    rv = best.get("ref_avg_velocities", {})
+
+    fieldnames = (
+        ["timestamp", "n_eval", "id", "cost"]
+        + [f"vel_{rid}" for rid in ref_ids]
+        + [dim.name for dim in space]
+    )
+    with open(BEST_CSV_PATH, "a", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=fieldnames)
+        row = {
+            "timestamp": datetime.now().isoformat(timespec="seconds"),
+            "n_eval": n_done,
+            "id": best["id"],
+            "cost": f"{best['cost']:.6f}",
+        }
+        for rid in ref_ids:
+            row[f"vel_{rid}"] = f"{rv.get(rid, 0.0):.4f}"
+        for dim in space:
+            row[dim.name] = f"{best['params'][dim.name]:.8g}"
+        w.writerow(row)
 
 
 def _print_best_so_far(all_results: list[dict], n_done: int) -> None:
-    """Print best result across all completed iterations."""
+    """Print best result and append to bests CSV if improved."""
+    global _best_cost_so_far
     best = min(all_results, key=lambda r: r["cost"])
-    sav = best["scene_avg_velocities"]
-    st = best.get("scene_tumble", {})
-    sl = best.get("scene_lateral", {})
-    rp = best.get("ref_pitch_rms", {})
-    res_str = " | ".join(
-        f"{s}: {(sav.get(s, 0) - _SCENE_TARGETS.get(s, 0.0)) * 100:+.1f} cm/s"
-        for s in MJCF_PATHS
-    )
-    tum_str = " | ".join(f"{s}: {st.get(s, 0.0):.4f}" for s in MJCF_PATHS)
-    lat_str = " | ".join(f"{s}: {sl.get(s, 0.0)*100:.1f} cm" for s in MJCF_PATHS)
-    pit_str = " | ".join(f"{rid}: {rp.get(rid, 0.0):.1f}°" for rid in rp)
-    print(
-        f"  Best so far (n={n_done}): cost={best['cost']:.6f} | "
-        f"residual: {res_str} | tumble: {tum_str} | "
-        f"lateral: {lat_str} | pitch: {pit_str} | id={best['id']}"
-    )
+    ref_rows = reference_rows()
+    is_new_best = best["cost"] < _best_cost_so_far
+    marker = " ★ NEW BEST" if is_new_best else ""
+    print(f"  Best so far (n={n_done}): cost={best['cost']:.6f}  id={best['id']}{marker}")
+    _print_ref_table(best, ref_rows, indent=4)
+
+    if is_new_best:
+        _best_cost_so_far = best["cost"]
+        _append_best_csv(best, n_done)
 
 
 # ---------------------------------------------------------------------------
@@ -556,12 +604,24 @@ if __name__ == "__main__":
             f"pitch_weight={row.get('pitch_weight', PITCH_RMS_WEIGHT)}"
         )
 
-    # Write CSV header once
+    # Write CSV headers once (overwrite from previous runs)
     try:
         with open(CSV_PATH, "w", newline="") as f:
             csv.DictWriter(f, fieldnames=csv_fieldnames()).writeheader()
     except Exception as e:
         print(f"  [Warning] Could not create CSV: {e}")
+
+    ref_ids = [row["id"] for row in reference_rows()]
+    best_fieldnames = (
+        ["timestamp", "n_eval", "id", "cost"]
+        + [f"vel_{rid}" for rid in ref_ids]
+        + [dim.name for dim in space]
+    )
+    try:
+        with open(BEST_CSV_PATH, "w", newline="") as f:
+            csv.DictWriter(f, fieldnames=best_fieldnames).writeheader()
+    except Exception as e:
+        print(f"  [Warning] Could not create bests CSV: {e}")
 
     try:
         multiprocessing.set_start_method("spawn", force=True)
@@ -596,18 +656,18 @@ if __name__ == "__main__":
     for dim, value in zip(space, result.x):
         print(f"  {dim.name}: {value:.6f}")
 
-    # Record top 5 rollouts
-    print("\n--- Recording Top 5 Best Rollouts ---")
+    # Record top 3 rollouts
+    print("\n--- Recording Top 3 Best Rollouts ---")
     import importlib
     sim_module = importlib.import_module(SIM_MODULE)
 
     sorted_results = sorted(all_results, key=lambda r: r["cost"])
     run_stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    replay_root = pathlib.Path("top_5_rollouts_multi") / run_stamp
+    replay_root = pathlib.Path("top_3_rollouts_multi") / run_stamp
     replay_root.mkdir(parents=True, exist_ok=True)
     print(f"Replay output root: {replay_root}")
 
-    for i in range(min(5, len(sorted_results))):
+    for i in range(min(3, len(sorted_results))):
         result_data = sorted_results[i]
         rank = i + 1
 
