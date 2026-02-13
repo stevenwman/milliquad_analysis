@@ -18,6 +18,9 @@ import imageio
 import imageio.plugins.ffmpeg
 import mujoco
 import mujoco.viewer
+# Suppress MuJoCo's C-level "Nan, Inf or huge value" stderr warnings —
+# _check_instability already catches these conditions programmatically.
+mujoco.set_mju_user_warning(lambda msg: None)
 import numpy as np
 import pathlib
 from scipy.spatial.transform import Rotation as R
@@ -425,7 +428,7 @@ def _write_video(record_path: str, frames: list, framerate: float) -> None:
 
 def run_simulation(
     params: dict[str, Any],
-    mjcf_path: str = str(PACKAGE_DIR / "mulit_milli_quad" / "scene_4.xml"),
+    mjcf_path: str = str(PACKAGE_DIR / "multi_milli_quad" / "scene_4.xml"),
     sim_duration: float = 10.0,
     visualize: bool = False,
     record_path: str | None = None,

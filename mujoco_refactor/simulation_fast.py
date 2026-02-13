@@ -466,7 +466,7 @@ def _write_video(record_path: str, frames: list, framerate: float) -> None:
 
 def run_simulation(
     params: dict[str, Any],
-    mjcf_path: str = str(PACKAGE_DIR / "mulit_milli_quad" / "scene_4.xml"),
+    mjcf_path: str = str(PACKAGE_DIR / "multi_milli_quad" / "scene_4.xml"),
     sim_duration: float = 10.0,
     visualize: bool = False,
     record_path: str | None = None,

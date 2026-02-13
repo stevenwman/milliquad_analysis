@@ -1,9 +1,14 @@
 """
-Compare COT across top-N results for all scenes.
+Compare COT across top-N results for all reference conditions.
+
+By default, runs each (scene, frequency) pair from REFERENCE_DATA.
+Use --scene and --freq to narrow down.
 
 Usage:
     uv run python compare_cot.py
-    uv run python compare_cot.py --top 5 --csv path/to/results.csv
+    uv run python compare_cot.py --top 5
+    uv run python compare_cot.py --scene scene4 --freq 30
+    uv run python compare_cot.py --freq 10 --freq 50
 """
 
 import argparse
@@ -11,7 +16,7 @@ import csv
 
 import mujoco
 
-from config import CSV_PATH, MJCF_PATHS
+from config import CSV_PATH, MJCF_PATHS, reference_rows
 from visualize_rollout import _sim_params_from_csv_row, compute_locomotion_metrics
 import importlib
 
@@ -23,10 +28,14 @@ _sim = importlib.import_module(SIM_MODULE)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Compare COT for top-N results across scenes.")
+    parser = argparse.ArgumentParser(description="Compare COT for top-N results across reference conditions.")
     parser.add_argument("--top", type=int, default=3, help="Number of top results to compare.")
     parser.add_argument("--csv", type=str, default=CSV_PATH, help="Path to results CSV.")
     parser.add_argument("--duration", type=float, default=5.0, help="Sim duration (seconds).")
+    parser.add_argument("--scene", type=str, default=None, choices=list(MJCF_PATHS.keys()),
+                        help="Filter to a single scene (default: all).")
+    parser.add_argument("--freq", type=float, action="append", default=None,
+                        help="Filter to specific drive frequency/frequencies in Hz (repeatable, default: all).")
     args = parser.parse_args()
 
     try:
@@ -41,21 +50,33 @@ def main():
         print("No results in CSV.")
         return
 
-    # Load robot mass per scene
+    # Build list of (ref_id, scene, freq) conditions to evaluate
+    ref_rows = reference_rows()
+    if args.scene:
+        ref_rows = [r for r in ref_rows if r["scene"] == args.scene]
+    if args.freq:
+        ref_rows = [r for r in ref_rows if r["ctrl_freq"] in args.freq]
+
+    if not ref_rows:
+        print("No reference rows match the given --scene/--freq filters.")
+        return
+
+    # Load robot mass per scene (only for scenes we'll actually use)
+    needed_scenes = {r["scene"] for r in ref_rows}
     scene_mass = {}
-    for scene, path in MJCF_PATHS.items():
-        model = mujoco.MjModel.from_xml_path(path)
+    for scene in needed_scenes:
+        model = mujoco.MjModel.from_xml_path(MJCF_PATHS[scene])
         scene_mass[scene] = sum(model.body_mass)
 
     # Header
-    scenes = list(MJCF_PATHS.keys())
     print(f"\n{'Rank':<6} {'ID':<10} {'Cost':<10}", end="")
-    for s in scenes:
-        print(f" {'Vel_'+s+'(m/s)':<14} {'COT_'+s:<12} {'Dist_'+s+'(mm)':<14} {'AvgPwr_'+s+'(W)':<16}", end="")
+    for ref in ref_rows:
+        label = ref["id"]
+        print(f" {'Vel_'+label:<18} {'COT_'+label:<14} {'Dist(mm)':<12} {'AvgPwr(W)':<14}", end="")
     print()
-    print("-" * (36 + 56 * len(scenes)))
+    print("-" * (26 + 58 * len(ref_rows)))
 
-    total_sims = n * len(scenes)
+    total_sims = n * len(ref_rows)
     sim_num = 0
     for rank_idx in range(n):
         row = results[rank_idx]
@@ -67,13 +88,18 @@ def main():
             print(f"  #{rank}: skipped — {e}")
             continue
 
-        row_data = {}
-        for scene in scenes:
+        ref_data = {}
+        for ref in ref_rows:
             sim_num += 1
-            print(f"\r  Running sim {sim_num}/{total_sims} (rank {rank}, {scene})...", end="", flush=True)
+            ref_id = ref["id"]
+            scene = ref["scene"]
+            freq = ref["ctrl_freq"]
+            print(f"\r  Running sim {sim_num}/{total_sims} (rank {rank}, {ref_id})...", end="", flush=True)
             mjcf_path = MJCF_PATHS[scene]
+            sp = dict(sim_params)
+            sp["drive_freq"] = freq
             traj = _sim.run_simulation(
-                sim_params,
+                sp,
                 mjcf_path=mjcf_path,
                 sim_duration=args.duration,
                 visualize=False,
@@ -81,20 +107,21 @@ def main():
                 progress=True,
             )
             if traj:
-                row_data[scene] = compute_locomotion_metrics(traj, scene_mass[scene])
+                ref_data[ref_id] = compute_locomotion_metrics(traj, scene_mass[scene])
             else:
-                row_data[scene] = None
+                ref_data[ref_id] = None
 
         # Clear progress line, print result row
         print(f"\r{rank:<6} {row['id']:<10} {float(row['cost']):<10.4f}", end="")
-        for scene in scenes:
-            vel_key = f"velocity_{scene}"
+        for ref in ref_rows:
+            ref_id = ref["id"]
+            vel_key = f"velocity_{ref_id}"
             csv_vel = float(row[vel_key]) if vel_key in row else float("nan")
-            m = row_data[scene]
+            m = ref_data[ref_id]
             if m:
-                print(f" {csv_vel:<14.4f} {m['cot']:<12.4f} {m['total_distance']*1e3:<14.1f} {m['avg_power_ext']:<16.4e}", end="")
+                print(f" {csv_vel:<18.4f} {m['cot']:<14.4f} {m['total_distance']*1e3:<12.1f} {m['avg_power_ext']:<14.4e}", end="")
             else:
-                print(f" {csv_vel:<14.4f} {'FAIL':<12} {'FAIL':<14} {'FAIL':<16}", end="")
+                print(f" {csv_vel:<18.4f} {'FAIL':<14} {'FAIL':<12} {'FAIL':<14}", end="")
         print()
 
     print()
