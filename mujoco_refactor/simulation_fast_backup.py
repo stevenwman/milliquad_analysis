@@ -265,22 +265,6 @@ def _apply_magnetic_forces(
     return angle
 
 
-def _apply_custom_damping(data, damp_quad: float) -> None:
-    """Apply quadratic velocity-dependent damping via joint forces.
-
-    Quadratic damping torque: τ_quad = -a * |ω| * ω
-    where a = damp_quad.
-
-    Linear term (b * ω) is handled by MuJoCo's implicit dof_damping for stability.
-    Total effective damping: τ = -(a * |ω| + b) * ω
-
-    Additive to other joint forces (independent from body forces in xfrc_applied).
-    """
-    omega = data.qvel[-4:]
-    quad_torque = -(damp_quad * np.abs(omega)) * omega
-    data.qfrc_applied[-4:] += quad_torque
-
-
 def _update_viewer_overlays(viewer, data, drive_freq, kp_mag, initial_pos, angle):
     """Update visual overlays (arrows and text) in the viewer."""
     viewer.user_scn.ngeom = 0
@@ -402,7 +386,6 @@ def _do_simulation_step(
     drive_freq: float,
     settle_time: float,
     mag_params: dict,
-    damp_quad: float,
     last_check_pos: np.ndarray | None,
     last_check_time: float,
     stuck_check_interval: float,
@@ -419,10 +402,7 @@ def _do_simulation_step(
     if benchmark and step_times is not None:
         t0 = time.perf_counter()
     step_cache = {}
-    # Zero joint forces before applying (prevents accumulation across steps)
-    data.qfrc_applied[:] = 0.0
     angle = _apply_magnetic_forces(data, kp_mag, drive_freq, settle_time, mag_params, step_cache)
-    _apply_custom_damping(data, damp_quad)
     if benchmark and step_times is not None:
         step_times["apply_forces"].append(time.perf_counter() - t0)
         t0 = time.perf_counter()
@@ -503,7 +483,7 @@ def run_simulation(
 
     Args:
         params: Simulation parameters dict. Expected keys:
-            ground_friction, damp_quad, damp_linear, solref, solimp, kp_mag, mag_params
+            ground_friction, dof_damping, solref, solimp, kp_mag, mag_params
         mjcf_path: Path to the MJCF XML file.
         sim_duration: Total simulation time in seconds.
         visualize: Launch interactive viewer (ignored if record_path is set).
@@ -522,15 +502,13 @@ def run_simulation(
     # Apply parameters (all required — caller must provide a fully-populated dict)
     ground_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, "floor")
     model.geom_friction[ground_id] = params['ground_friction']
-    # Linear damping via implicit solver (stable); quadratic part via qfrc_applied
-    model.dof_damping[-4:] = params['damp_linear']
+    model.dof_damping[-4:] = params['dof_damping']
     model.opt.o_solref = params['solref']
     model.opt.o_solimp = params['solimp']
 
     kp_mag = params['kp_mag']
     drive_freq = params['drive_freq']
     mag_params = params['mag_params']
-    damp_quad = params['damp_quad']
 
     model.opt.timestep = SIM_TIMESTEP
     # Enable global contact parameter overrides (o_solref, o_solimp) for all contacts
@@ -588,7 +566,7 @@ def run_simulation(
                     if not paused:
                         angle, last_check_pos, last_check_time = _do_simulation_step(
                             model, data, trajectory, kp_mag, drive_freq, SETTLE_TIME,
-                            mag_params, damp_quad,
+                            mag_params,
                             last_check_pos, last_check_time, STUCK_CHECK_INTERVAL,
                             STUCK_THRESHOLD, ignore_stuck_detection, debug
                         )
@@ -611,7 +589,7 @@ def run_simulation(
                     )
                 angle, last_check_pos, last_check_time = _do_simulation_step(
                     model, data, trajectory, kp_mag, drive_freq, SETTLE_TIME,
-                    mag_params, damp_quad,
+                    mag_params,
                     last_check_pos, last_check_time, STUCK_CHECK_INTERVAL,
                     STUCK_THRESHOLD, ignore_stuck_detection, debug,
                     benchmark=benchmark, step_times=step_times
@@ -663,8 +641,7 @@ if __name__ == "__main__":
     from config import DEFAULT_CTRL_FREQ
     default_params = {
         'ground_friction': [1e-5, 1e-5, 1e-5],
-        'damp_quad': 1e-9,
-        'damp_linear': 7e-10,
+        'dof_damping': 7e-10,
         'solref': [0.004, 1],
         'solimp': [0.95, 0.99, 1e-3, 0.5, 1.0],
         'kp_mag': 2.5e-6,

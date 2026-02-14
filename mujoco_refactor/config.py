@@ -89,7 +89,7 @@ REFERENCE_DATA: list[dict[str, Any]] = [
 # ---------------------------------------------------------------------------
 # Optimization hyper-parameters
 # ---------------------------------------------------------------------------
-N_CALLS = 200  # total optimization iterations
+N_CALLS = 300  # total optimization iterations
 SIM_DURATION = 3.0  # seconds per simulation run
 SIMULATION_TIMEOUT = 35  # wall-clock seconds per worker
 ROLLOUTS_PER_SCENE = 1  # sims per scene per iteration (>1 only for noisy sims)
@@ -97,7 +97,18 @@ BATCH_SIZE = 8  # points proposed per optimizer step
 VERBOSE_BATCH = True
 PROFILE_BATCH = True
 # "rf" = random forest (fast ask/tell); "gp" = Gaussian process (slow at high n)
-BASE_ESTIMATOR = "rf"
+BASE_ESTIMATOR = "gp"
+# Acquisition function: "EI" (expected improvement), "LCB" (lower confidence bound),
+# "PI" (probability of improvement), "gp_hedge" (portfolio of all three)
+ACQ_FUNC = "LCB"
+# Acquisition function kwargs — kappa (LCB explore/exploit, 0.5–3.0),
+# xi (EI/PI explore/exploit, ~0.01)
+ACQ_FUNC_KWARGS: dict = {"kappa": 1.5}
+# Number of random points before surrogate model kicks in
+N_INITIAL_POINTS = 15
+# Observation noise: "gaussian" (auto-estimated), float (fixed variance), or None
+OPTIMIZER_NOISE = "gaussian"
+OPTIMIZER_RANDOM_STATE = 42
 
 # ---------------------------------------------------------------------------
 # Cost-function constants
@@ -113,22 +124,56 @@ PITCH_RMS_TARGET_DEG = 0.0  # target RMS pitch (deg); set when you have referenc
 PITCH_RMS_WEIGHT = 0.0  # set >0 to include RMS pitch in objective
 
 # ---------------------------------------------------------------------------
-# Search space (13 dimensions)
+# Search space (13 dimensions) — narrowed from 200-eval run analysis
 # ---------------------------------------------------------------------------
+# Original broad ranges (for reference):
+# space_broad: list[Real] = [
+#     Real(1e-5, 0.8, "log-uniform", name="sliding_friction"),
+#     Real(1e-5, 0.1, "log-uniform", name="torsional_friction"),
+#     Real(1e-5, 0.1, "log-uniform", name="rolling_friction"),
+#     Real(0.001, 0.1, "uniform", name="solref_timeconst"),
+#     Real(0.1, 2.0, "uniform", name="solref_dampratio"),
+#     Real(0.8, 0.99, "uniform", name="solimp_dmin"),
+#     Real(0.95, 0.999, "uniform", name="solimp_dmax"),
+#     Real(1e-4, 1e-2, "log-uniform", name="solimp_width"),
+#     Real(0.1, 0.9, "uniform", name="solimp_midpoint"),
+#     Real(1.0, 6.0, "uniform", name="solimp_power"),
+#     Real(0.5, 1.5, "uniform", name="magnetic_moment_fudge"),
+#     Real(0.5, 1.5, "uniform", name="magnetic_field_fudge"),
+#     Real(7e-11, 7e-9, "log-uniform", name="dof_damping"),
+# ]
+# Narrowed ranges (run 2 — params hit bounds, commented out):
+# space_narrow: list[Real] = [
+#     Real(0.01, 0.15, "log-uniform", name="sliding_friction"),       # ← hit upper
+#     Real(0.005, 0.1, "log-uniform", name="torsional_friction"),
+#     Real(1e-5, 0.05, "log-uniform", name="rolling_friction"),
+#     Real(0.001, 0.01, "uniform", name="solref_timeconst"),
+#     Real(1.0, 2.0, "uniform", name="solref_dampratio"),
+#     Real(0.8, 0.9, "uniform", name="solimp_dmin"),
+#     Real(0.95, 0.999, "uniform", name="solimp_dmax"),
+#     Real(5e-5, 1e-3, "log-uniform", name="solimp_width"),
+#     Real(0.1, 0.7, "uniform", name="solimp_midpoint"),
+#     Real(2.0, 5.0, "uniform", name="solimp_power"),                 # ← hit upper
+#     Real(0.7, 1.3, "uniform", name="magnetic_moment_fudge"),        # ← hit lower
+#     Real(0.5, 1.3, "uniform", name="magnetic_field_fudge"),         # ← hit upper
+#     Real(1e-10, 2e-9, "log-uniform", name="dof_damping"),           # ← hit upper
+# ]
 space: list[Real] = [
-    Real(1e-5, 0.8, "log-uniform", name="sliding_friction"),
-    Real(1e-5, 0.1, "log-uniform", name="torsional_friction"),
-    Real(1e-5, 0.1, "log-uniform", name="rolling_friction"),
-    Real(0.001, 0.1, "uniform", name="solref_timeconst"),
-    Real(0.1, 2.0, "uniform", name="solref_dampratio"),
-    Real(0.8, 0.99, "uniform", name="solimp_dmin"),
+    Real(0.01, 0.4, "log-uniform", name="sliding_friction"),
+    Real(0.005, 0.1, "log-uniform", name="torsional_friction"),
+    Real(1e-5, 0.05, "log-uniform", name="rolling_friction"),
+    Real(0.001, 0.01, "uniform", name="solref_timeconst"),
+    Real(1.0, 2.0, "uniform", name="solref_dampratio"),
+    Real(0.8, 0.9, "uniform", name="solimp_dmin"),
     Real(0.95, 0.999, "uniform", name="solimp_dmax"),
-    Real(1e-4, 1e-2, "log-uniform", name="solimp_width"),
-    Real(0.1, 0.9, "uniform", name="solimp_midpoint"),
-    Real(1.0, 6.0, "uniform", name="solimp_power"),
-    Real(0.5, 1.5, "uniform", name="magnetic_moment_fudge"),
-    Real(0.5, 1.5, "uniform", name="magnetic_field_fudge"),
-    Real(7e-11, 7e-9, "log-uniform", name="dof_damping"),
+    Real(5e-5, 1e-3, "log-uniform", name="solimp_width"),
+    Real(0.1, 0.7, "uniform", name="solimp_midpoint"),
+    Real(2.0, 8.0, "uniform", name="solimp_power"),
+    Real(0.4, 1.3, "uniform", name="magnetic_moment_fudge"),
+    Real(0.5, 2.0, "uniform", name="magnetic_field_fudge"),
+    # Custom velocity-dependent damping: τ = -(damp_quad * |ω| + damp_linear) * ω
+    Real(1e-12, 1e-6, "log-uniform", name="damp_quad"),    # quadratic coeff (a)
+    Real(1e-11, 1e-7, "log-uniform", name="damp_linear"),  # linear coeff (b), replaces dof_damping
 ]
 
 # ---------------------------------------------------------------------------
@@ -217,7 +262,8 @@ def sim_params_from_point(point: list[float]) -> dict[str, Any]:
             params["solimp_midpoint"],
             params["solimp_power"],
         ],
-        "dof_damping": params["dof_damping"],
+        "damp_quad": params["damp_quad"],
+        "damp_linear": params["damp_linear"],
         "kp_mag": kp_mag,
         "mag_params": {"m_mag": m_mag},
     }
