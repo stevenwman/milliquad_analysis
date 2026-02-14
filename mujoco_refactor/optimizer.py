@@ -24,6 +24,8 @@ from scipy.spatial.transform import Rotation as R
 from skopt import Optimizer
 
 from config import (
+    ACQ_FUNC,
+    ACQ_FUNC_KWARGS,
     BASE_ESTIMATOR,
     BATCH_SIZE,
     BEST_CSV_PATH,
@@ -34,6 +36,9 @@ from config import (
     INIT_YAW_JITTER_DEG,
     MJCF_PATHS,
     N_CALLS,
+    N_INITIAL_POINTS,
+    OPTIMIZER_NOISE,
+    OPTIMIZER_RANDOM_STATE,
     PROFILE_BATCH,
     SIMULATION_TIMEOUT,
     SETTLE_TIME,
@@ -123,7 +128,7 @@ def calculate_cost(
         forward_displacement = final_state["pos"][0] - start_state["pos"][0]
         avg_forward_velocity = forward_displacement / active_duration
 
-    velocity_error = (avg_forward_velocity - target_velocity) ** 2
+    velocity_error = ((avg_forward_velocity - target_velocity) / target_velocity) ** 2
 
     # Lateral displacement penalty (y-axis drift)
     lateral_displacement = 0.0
@@ -197,10 +202,10 @@ def _evaluate_one_scene(args):
     """
     Run one trial for one (point, reference row). Used by process pool.
 
-    args: (point_index, point, ref_row, trial_index, show_progress)
+    args: (point_index, point, ref_row, trial_index, show_progress, global_point_index)
     Returns: (point_index, ref_id, scene_name, cost, velocity, tumble, pitch_rms, lateral, weight, wall_time)
     """
-    point_index, point, ref_row, trial_index, show_progress = args
+    point_index, point, ref_row, trial_index, show_progress, global_point_index = args
 
     # Lazy import in subprocess (separate memory space)
     import importlib
@@ -219,7 +224,7 @@ def _evaluate_one_scene(args):
     # Deterministic jitter seeds (stable across processes).
     ref_idx = sum(ord(c) for c in ref_row["id"]) % 1000
     t0 = time.perf_counter()
-    seed = INIT_JITTER_SEED + 100000 * point_index + 1000 * ref_idx + trial_index
+    seed = INIT_JITTER_SEED + 100000 * global_point_index + 1000 * ref_idx + trial_index
     trajectory = _sim.run_simulation(
         sim_params,
         mjcf_path=mjcf_path,
@@ -505,12 +510,28 @@ def _run_batch_optimization(all_results: list[dict], pool: multiprocessing.Pool)
         all_results: Mutable list to accumulate results (replaces global).
         pool: Pre-created multiprocessing pool.
     """
-    optimizer = Optimizer(
+    # Build base estimator — noise must be configured on the GP object, not Optimizer
+    estimator = BASE_ESTIMATOR
+    if BASE_ESTIMATOR == "gp" and OPTIMIZER_NOISE is not None:
+        from skopt.learning import GaussianProcessRegressor
+        from skopt.learning.gaussian_process.kernels import Matern
+        estimator = GaussianProcessRegressor(
+            kernel=Matern(nu=2.5),
+            noise=OPTIMIZER_NOISE,
+            n_restarts_optimizer=2,
+            normalize_y=True,
+        )
+
+    opt_kwargs = dict(
         dimensions=space,
-        base_estimator=BASE_ESTIMATOR,
-        n_initial_points=20,
-        random_state=42,
+        base_estimator=estimator,
+        n_initial_points=N_INITIAL_POINTS,
+        random_state=OPTIMIZER_RANDOM_STATE,
+        acq_func=ACQ_FUNC,
     )
+    if ACQ_FUNC_KWARGS:
+        opt_kwargs["acq_func_kwargs"] = ACQ_FUNC_KWARGS
+    optimizer = Optimizer(**opt_kwargs)
     n_done = 0
 
     batch_num = 0
@@ -535,6 +556,7 @@ def _run_batch_optimization(all_results: list[dict], pool: multiprocessing.Pool)
                 ref_row,
                 trial_idx,
                 (i == 0 and ref_idx == 0 and trial_idx == 0),
+                n_done + i,  # global point index for unique jitter seeds
             )
             for i, point in enumerate(points)
             for ref_idx, ref_row in enumerate(_REF_ROWS)
