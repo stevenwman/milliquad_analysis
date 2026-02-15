@@ -39,9 +39,14 @@ for r in rows:
     elapsed = r.get('elapsed_min', '')
     elapsed_str = f"  t={elapsed}min" if elapsed else ""
     print(f"  {r['timestamp']}  n={r['n_eval']}{elapsed_str}  id={r['id']}  cost={r['cost']}")
+    has_yaw = f"yaw_{ref_ids[0]}" in r
     if has_lateral:
-        print(f"  {'ref_id':<18} {'target':>7} {'sim':>7} {'Δvel':>9} {'Δ%':>5} {'tumble':>7} {'lateral':>8} {'pitch':>6}")
-        print(f"  {'-' * 72}")
+        if has_yaw:
+            print(f"  {'ref_id':<18} {'target':>7} {'sim':>7} {'Δvel':>9} {'Δ%':>5} {'tumble':>7} {'lateral':>8} {'yaw':>5} {'pitch':>6}")
+            print(f"  {'-' * 78}")
+        else:
+            print(f"  {'ref_id':<18} {'target':>7} {'sim':>7} {'Δvel':>9} {'Δ%':>5} {'tumble':>7} {'lateral':>8} {'pitch':>6}")
+            print(f"  {'-' * 72}")
     else:
         print(f"  {'ref_id':<18} {'target':>7} {'sim':>7} {'Δvel':>9} {'Δ%':>5}")
         print(f"  {'-' * 50}")
@@ -53,8 +58,12 @@ for r in rows:
         if has_lateral:
             tmb = float(r.get(f"tumble_{rid}", 0))
             lat = float(r.get(f"lateral_{rid}", 0)) * 100  # cm
+            yaw = float(r.get(f"yaw_{rid}", 0)) if has_yaw else None
             pit = float(r.get(f"pitch_rms_{rid}", 0))
-            print(f"  {rid:<18} {t:>6.3f}  {s:>6.3f}  {d:>+7.1f}cs {dpct:>+4.0f}%  {tmb:>6.4f}  {lat:>6.1f}cm  {pit:>4.1f}°")
+            if has_yaw:
+                print(f"  {rid:<18} {t:>6.3f}  {s:>6.3f}  {d:>+7.1f}cs {dpct:>+4.0f}%  {tmb:>6.4f}  {lat:>6.1f}cm  {yaw:>4.0f}°  {pit:>4.1f}°")
+            else:
+                print(f"  {rid:<18} {t:>6.3f}  {s:>6.3f}  {d:>+7.1f}cs {dpct:>+4.0f}%  {tmb:>6.4f}  {lat:>6.1f}cm  {pit:>4.1f}°")
         else:
             print(f"  {rid:<18} {t:>6.3f}  {s:>6.3f}  {d:>+7.1f}cs {dpct:>+4.0f}%")
     print()

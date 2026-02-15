@@ -294,12 +294,13 @@ def csv_fieldnames() -> list[str]:
     ref_vel_names = [f"velocity_{rid}" for rid in rids]
     ref_lateral_names = [f"lateral_{rid}" for rid in rids]
     ref_tumble_names = [f"tumble_{rid}" for rid in rids]
+    ref_yaw_names = [f"yaw_{rid}" for rid in rids]
     ref_pitch_names = [f"pitch_rms_{rid}" for rid in rids]
     return (
         ["id", "cost"]
         + scene_vel_names + scene_cost_names
         + ref_vel_names + ref_cost_names
-        + ref_lateral_names + ref_tumble_names + ref_pitch_names
+        + ref_lateral_names + ref_tumble_names + ref_yaw_names + ref_pitch_names
         + param_names
     )
 
