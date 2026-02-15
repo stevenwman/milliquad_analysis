@@ -344,6 +344,7 @@ def _aggregate_scene_results(points: list, scene_results: list) -> list[dict]:
         tumble,
         pitch_rms,
         lateral,
+        yaw_deg,
         weight,
         wall_time,
     ) in scene_results:
@@ -353,6 +354,7 @@ def _aggregate_scene_results(points: list, scene_results: list) -> list[dict]:
         d["ref_trials_tumble"][ref_id].append(tumble)
         d["ref_trials_pitch_rms"][ref_id].append(pitch_rms)
         d["ref_trials_lateral"][ref_id].append(lateral)
+        d["ref_trials_yaw"][ref_id].append(yaw_deg)
         if cost >= COST_FAILURE:
             d["has_failure"] = True
         d["ref_weights"][ref_id] = weight
@@ -368,6 +370,7 @@ def _aggregate_scene_results(points: list, scene_results: list) -> list[dict]:
         ref_tumble = {}
         ref_pitch_rms = {}
         ref_lateral = {}
+        ref_yaw = {}
 
         for ref_id, trials in d["ref_trials_costs"].items():
             scene = d["ref_scene"][ref_id]
@@ -377,12 +380,14 @@ def _aggregate_scene_results(points: list, scene_results: list) -> list[dict]:
             mean_tumble = float(np.mean(d["ref_trials_tumble"][ref_id]))
             mean_pitch = float(np.mean(d["ref_trials_pitch_rms"][ref_id]))
             mean_lateral = float(np.mean(d["ref_trials_lateral"][ref_id]))
+            mean_yaw = float(np.mean(d["ref_trials_yaw"][ref_id]))
 
             ref_costs[ref_id] = mean_cost
             ref_avg_velocities[ref_id] = mean_vel
             ref_tumble[ref_id] = mean_tumble
             ref_pitch_rms[ref_id] = mean_pitch
             ref_lateral[ref_id] = mean_lateral
+            ref_yaw[ref_id] = mean_yaw
 
             d["scene_costs"][scene] += weight * mean_cost
             d["scene_vel_num"][scene] += weight * mean_vel
@@ -432,6 +437,7 @@ def _aggregate_scene_results(points: list, scene_results: list) -> list[dict]:
             "ref_tumble": ref_tumble,
             "ref_pitch_rms": ref_pitch_rms,
             "ref_lateral": ref_lateral,
+            "ref_yaw": ref_yaw,
             "ref_weights": d["ref_weights"],
             "ref_scene": d["ref_scene"],
             "wall_time": point_wall,
@@ -454,6 +460,7 @@ def _append_result_to_csv(res: dict[str, Any]) -> None:
         row[f"cost_{rid}"] = res["ref_costs"].get(rid, 0)
         row[f"lateral_{rid}"] = res.get("ref_lateral", {}).get(rid, 0)
         row[f"tumble_{rid}"] = res.get("ref_tumble", {}).get(rid, 0)
+        row[f"yaw_{rid}"] = res.get("ref_yaw", {}).get(rid, 0)
         row[f"pitch_rms_{rid}"] = res.get("ref_pitch_rms", {}).get(rid, 0)
     row.update(res["params"])
     try:
@@ -483,10 +490,11 @@ def _print_ref_table(r: dict, ref_rows: list[dict], indent: int = 4) -> None:
     rt = r.get("ref_tumble", {})
     rp = r.get("ref_pitch_rms", {})
     rl = r.get("ref_lateral", {})
+    ry = r.get("ref_yaw", {})
     pad = " " * indent
     # Header
-    print(f"{pad}{'ref_id':<18} {'target':>7} {'sim':>7} {'Δvel':>9} {'Δ%':>5} {'tumble':>7} {'lateral':>8} {'pitch':>6}")
-    print(f"{pad}{'-'*72}")
+    print(f"{pad}{'ref_id':<18} {'target':>7} {'sim':>7} {'Δvel':>9} {'Δ%':>5} {'tumble':>7} {'lateral':>8} {'yaw':>5} {'pitch':>6}")
+    print(f"{pad}{'-'*78}")
     for row in ref_rows:
         rid = row["id"]
         target = row["speed"]
@@ -495,8 +503,9 @@ def _print_ref_table(r: dict, ref_rows: list[dict], indent: int = 4) -> None:
         delta_pct = ((sim_v - target) / target * 100) if target != 0 else 0.0
         tmb = rt.get(rid, 0.0)
         lat = rl.get(rid, 0.0) * 100  # cm
+        yaw = ry.get(rid, 0.0)
         pit = rp.get(rid, 0.0)
-        print(f"{pad}{rid:<18} {target:>6.3f}  {sim_v:>6.3f}  {delta:>+7.1f}cs {delta_pct:>+4.0f}%  {tmb:>6.4f}  {lat:>6.1f}cm  {pit:>4.1f}°")
+        print(f"{pad}{rid:<18} {target:>6.3f}  {sim_v:>6.3f}  {delta:>+7.1f}cs {delta_pct:>+4.0f}%  {tmb:>6.4f}  {lat:>6.1f}cm  {yaw:>4.0f}°  {pit:>4.1f}°")
 
 
 _best_cost_so_far: float = float("inf")
@@ -510,6 +519,7 @@ def _best_csv_fieldnames() -> list[str]:
         + [f"vel_{rid}" for rid in ref_ids]
         + [f"lateral_{rid}" for rid in ref_ids]
         + [f"tumble_{rid}" for rid in ref_ids]
+        + [f"yaw_{rid}" for rid in ref_ids]
         + [f"pitch_rms_{rid}" for rid in ref_ids]
         + [dim.name for dim in space]
     )
@@ -523,6 +533,7 @@ def _append_best_csv(best: dict, n_done: int, elapsed_min: float) -> None:
     rv = best.get("ref_avg_velocities", {})
     rl = best.get("ref_lateral", {})
     rt = best.get("ref_tumble", {})
+    ry = best.get("ref_yaw", {})
     rp = best.get("ref_pitch_rms", {})
 
     with open(BEST_CSV_PATH, "a", newline="") as f:
@@ -538,6 +549,7 @@ def _append_best_csv(best: dict, n_done: int, elapsed_min: float) -> None:
             row[f"vel_{rid}"] = f"{rv.get(rid, 0.0):.4f}"
             row[f"lateral_{rid}"] = f"{rl.get(rid, 0.0):.6f}"
             row[f"tumble_{rid}"] = f"{rt.get(rid, 0.0):.6f}"
+            row[f"yaw_{rid}"] = f"{ry.get(rid, 0.0):.1f}"
             row[f"pitch_rms_{rid}"] = f"{rp.get(rid, 0.0):.2f}"
         for dim in space:
             row[dim.name] = f"{best['params'][dim.name]:.8g}"
