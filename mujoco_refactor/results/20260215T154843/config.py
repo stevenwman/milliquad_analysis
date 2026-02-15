@@ -182,8 +182,6 @@ LATERAL_COST_WEIGHT = 5.0  # penalizes lateral (y) displacement squared
 VELOCITY_VARIANCE_WEIGHT = 2.0  # penalizes uneven velocity errors across references
 PITCH_RMS_TARGET_DEG = 0.0  # target RMS pitch (deg); set when you have reference
 PITCH_RMS_WEIGHT = 0.0  # set >0 to include RMS pitch in objective
-YAW_THRESHOLD_DEG = 60.0  # final heading deviation beyond this triggers penalty
-YAW_COST_WEIGHT = 1.0  # weight for yaw spin-out penalty
 
 # ---------------------------------------------------------------------------
 # Search space (13 dimensions) — narrowed from 200-eval run analysis

@@ -1,9 +1,8 @@
 """
-Batch optimization for multi-scene simulation parameter tuning.
+Batch Bayesian optimization for multi-scene simulation parameter tuning.
 
-Supports two backends (set OPTIMIZER_BACKEND in config.py):
-  - "skopt": Bayesian optimization via scikit-optimize (GP/RF surrogate)
-  - "cmaes": CMA Evolution Strategy via pycma
+Uses scikit-optimize with parallel batch evaluation across multiple robot
+configurations (2-leg and 4-leg scenes).
 
 Usage:
     cd mujoco_refactor
@@ -22,6 +21,7 @@ from typing import Any, NamedTuple
 
 import numpy as np
 from scipy.spatial.transform import Rotation as R
+from skopt import Optimizer
 
 from config import (
     ACQ_FUNC,
@@ -29,8 +29,6 @@ from config import (
     BASE_ESTIMATOR,
     BATCH_SIZE,
     BEST_CSV_PATH,
-    CMAES_SIGMA0,
-    CMAES_X0,
     COST_FAILURE,
     CSV_PATH,
     INIT_JITTER_SEED,
@@ -39,7 +37,6 @@ from config import (
     MJCF_PATHS,
     N_CALLS,
     N_INITIAL_POINTS,
-    OPTIMIZER_BACKEND,
     OPTIMIZER_NOISE,
     OPTIMIZER_RANDOM_STATE,
     PROFILE_BATCH,
@@ -57,8 +54,6 @@ from config import (
     VELOCITY_COST_WEIGHT,
     VELOCITY_VARIANCE_WEIGHT,
     LATERAL_COST_WEIGHT,
-    YAW_THRESHOLD_DEG,
-    YAW_COST_WEIGHT,
     csv_fieldnames,
     point_to_params,
     sim_params_from_point,
@@ -101,13 +96,11 @@ _SCENE_TARGETS = {
 # Uprightness = dot(body_z, nominal_down); +1 = normal, < threshold = flipped.
 _BODY_Z_LOCAL = np.array([0.0, 0.0, 1.0])
 _NOMINAL_BODY_Z_WORLD = np.array([0.0, 0.0, -1.0])
-_BODY_X_LOCAL = np.array([1.0, 0.0, 0.0])
 
 
 def calculate_cost(
     trajectory: list[dict],
     target_velocity: float,
-    speed_std: float = 0.0,
     pitch_target_deg: float | None = None,
     pitch_weight: float | None = None,
     verbose: bool = True,
@@ -116,12 +109,10 @@ def calculate_cost(
     Calculate cost from simulation trajectory.
 
     Penalizes deviation from target velocity and tumbling instability.
-    If speed_std > 0, velocity errors within 1-sigma of target cost zero (dead zone).
     Returns dict with total_cost, avg_forward_velocity, tumble_penalty.
     """
     if not trajectory:
-        return {"total_cost": COST_FAILURE, "avg_forward_velocity": 0, "tumble_penalty": 0,
-                "lateral_displacement": 0, "yaw_deviation_deg": 0, "pitch_rms_deg": 0}
+        return {"total_cost": COST_FAILURE, "avg_forward_velocity": 0, "tumble_penalty": 0}
 
     # Forward velocity cost (over active time, after settle)
     final_state = trajectory[-1]
@@ -137,16 +128,7 @@ def calculate_cost(
         forward_displacement = final_state["pos"][0] - start_state["pos"][0]
         avg_forward_velocity = forward_displacement / active_duration
 
-    # Dead-zone velocity error: no penalty within 1-sigma of target
-    vel_deviation = avg_forward_velocity - target_velocity
-    if speed_std > 0.0 and abs(vel_deviation) <= speed_std:
-        velocity_error = 0.0
-    elif speed_std > 0.0:
-        # Penalize only the excess beyond the dead zone
-        excess = abs(vel_deviation) - speed_std
-        velocity_error = (excess / target_velocity) ** 2
-    else:
-        velocity_error = (vel_deviation / target_velocity) ** 2
+    velocity_error = ((avg_forward_velocity - target_velocity) / target_velocity) ** 2
 
     # Lateral displacement penalty (y-axis drift)
     lateral_displacement = 0.0
@@ -186,28 +168,10 @@ def calculate_cost(
         pitch_weight = PITCH_RMS_WEIGHT
     pitch_error = (pitch_rms_deg - pitch_target_deg) ** 2
 
-    # Yaw spin-out check: compare final heading to initial heading.
-    # Only penalizes large deviations (> YAW_THRESHOLD_DEG); normal yaw oscillation is fine.
-    start_body_x = R.from_quat(start_state["quat"], scalar_first=True).apply(_BODY_X_LOCAL)
-    end_body_x = R.from_quat(final_state["quat"], scalar_first=True).apply(_BODY_X_LOCAL)
-    start_heading = start_body_x[:2]
-    end_heading = end_body_x[:2]
-    start_norm = np.linalg.norm(start_heading)
-    end_norm = np.linalg.norm(end_heading)
-    yaw_deviation_deg = 0.0
-    yaw_penalty = 0.0
-    if start_norm > 1e-6 and end_norm > 1e-6:
-        cos_yaw = np.clip(np.dot(start_heading / start_norm, end_heading / end_norm), -1.0, 1.0)
-        yaw_deviation_deg = np.degrees(np.arccos(cos_yaw))
-        if yaw_deviation_deg > YAW_THRESHOLD_DEG:
-            excess = yaw_deviation_deg - YAW_THRESHOLD_DEG
-            yaw_penalty = (excess / 90.0) ** 2
-
     total_cost = (
         VELOCITY_COST_WEIGHT * velocity_error
         + TUMBLE_COST_WEIGHT * tumble_penalty
         + LATERAL_COST_WEIGHT * lateral_error
-        + YAW_COST_WEIGHT * yaw_penalty
         + pitch_weight * pitch_error
     )
 
@@ -217,7 +181,6 @@ def calculate_cost(
             f"Vel Err: {velocity_error:.4f} | "
             f"Lateral: {lateral_displacement:.4f} m | "
             f"Tumble Pen: {tumble_penalty:.4f} | "
-            f"Yaw: {yaw_deviation_deg:.1f}° | "
             f"Pitch RMS: {pitch_rms_deg:.2f} deg | "
             f"Total Cost: {total_cost:.4f}"
         )
@@ -227,7 +190,6 @@ def calculate_cost(
         "avg_forward_velocity": avg_forward_velocity,
         "lateral_displacement": lateral_displacement,
         "tumble_penalty": tumble_penalty,
-        "yaw_deviation_deg": yaw_deviation_deg,
         "pitch_rms_deg": pitch_rms_deg,
     }
 
@@ -254,7 +216,6 @@ def _evaluate_one_scene(args):
     scene_name = ref_row["scene"]
     mjcf_path = MJCF_PATHS[scene_name]
     target_velocity = ref_row["speed"]
-    speed_std = ref_row.get("speed_std", 0.0)
     pitch_target_deg = ref_row.get("pitch_amp_deg", PITCH_RMS_TARGET_DEG)
     pitch_weight = ref_row.get("pitch_weight", PITCH_RMS_WEIGHT)
     weight = ref_row.get("weight", 1.0)
@@ -281,13 +242,11 @@ def _evaluate_one_scene(args):
             "tumble_penalty": 0.0,
             "pitch_rms_deg": 0.0,
             "lateral_displacement": 0.0,
-            "yaw_deviation_deg": 0.0,
         }
     else:
         cost_data = calculate_cost(
             trajectory,
             target_velocity,
-            speed_std=speed_std,
             pitch_target_deg=pitch_target_deg,
             pitch_weight=pitch_weight,
             verbose=False,
@@ -304,7 +263,6 @@ def _evaluate_one_scene(args):
         cost_data.get("tumble_penalty", 0.0),
         cost_data.get("pitch_rms_deg", 0.0),
         cost_data.get("lateral_displacement", 0.0),
-        cost_data.get("yaw_deviation_deg", 0.0),
         weight,
         wall_time,
     )
@@ -323,7 +281,6 @@ def _aggregate_scene_results(points: list, scene_results: list) -> list[dict]:
             "ref_trials_tumble": defaultdict(list),
             "ref_trials_pitch_rms": defaultdict(list),
             "ref_trials_lateral": defaultdict(list),
-            "ref_trials_yaw": defaultdict(list),
             "ref_weights": {},
             "ref_scene": {},
             "scene_costs": defaultdict(float),
@@ -452,9 +409,6 @@ def _append_result_to_csv(res: dict[str, Any]) -> None:
     for rid in reference_ids():
         row[f"velocity_{rid}"] = res["ref_avg_velocities"].get(rid, 0)
         row[f"cost_{rid}"] = res["ref_costs"].get(rid, 0)
-        row[f"lateral_{rid}"] = res.get("ref_lateral", {}).get(rid, 0)
-        row[f"tumble_{rid}"] = res.get("ref_tumble", {}).get(rid, 0)
-        row[f"pitch_rms_{rid}"] = res.get("ref_pitch_rms", {}).get(rid, 0)
     row.update(res["params"])
     try:
         with open(CSV_PATH, "a", newline="") as f:
@@ -485,66 +439,50 @@ def _print_ref_table(r: dict, ref_rows: list[dict], indent: int = 4) -> None:
     rl = r.get("ref_lateral", {})
     pad = " " * indent
     # Header
-    print(f"{pad}{'ref_id':<18} {'target':>7} {'sim':>7} {'Δvel':>9} {'Δ%':>5} {'tumble':>7} {'lateral':>8} {'pitch':>6}")
-    print(f"{pad}{'-'*72}")
+    print(f"{pad}{'ref_id':<18} {'target':>7} {'sim':>7} {'Δvel':>9} {'tumble':>7} {'lateral':>8} {'pitch':>6}")
+    print(f"{pad}{'-'*66}")
     for row in ref_rows:
         rid = row["id"]
         target = row["speed"]
         sim_v = rv.get(rid, 0.0)
         delta = (sim_v - target) * 100  # cm/s
-        delta_pct = ((sim_v - target) / target * 100) if target != 0 else 0.0
         tmb = rt.get(rid, 0.0)
         lat = rl.get(rid, 0.0) * 100  # cm
         pit = rp.get(rid, 0.0)
-        print(f"{pad}{rid:<18} {target:>6.3f}  {sim_v:>6.3f}  {delta:>+7.1f}cs {delta_pct:>+4.0f}%  {tmb:>6.4f}  {lat:>6.1f}cm  {pit:>4.1f}°")
+        print(f"{pad}{rid:<18} {target:>6.3f}  {sim_v:>6.3f}  {delta:>+7.1f}cs  {tmb:>6.4f}  {lat:>6.1f}cm  {pit:>4.1f}°")
 
 
 _best_cost_so_far: float = float("inf")
 
 
-def _best_csv_fieldnames() -> list[str]:
-    """Column names for the bests CSV (shared by header writer and append)."""
-    ref_ids = [row["id"] for row in reference_rows()]
-    return (
-        ["timestamp", "elapsed_min", "n_eval", "id", "cost"]
-        + [f"vel_{rid}" for rid in ref_ids]
-        + [f"lateral_{rid}" for rid in ref_ids]
-        + [f"tumble_{rid}" for rid in ref_ids]
-        + [f"pitch_rms_{rid}" for rid in ref_ids]
-        + [dim.name for dim in space]
-    )
-
-
-def _append_best_csv(best: dict, n_done: int, elapsed_min: float) -> None:
+def _append_best_csv(best: dict, n_done: int) -> None:
     """Append a new-best row to the running bests CSV."""
     from datetime import datetime
     ref_rows = reference_rows()
     ref_ids = [row["id"] for row in ref_rows]
     rv = best.get("ref_avg_velocities", {})
-    rl = best.get("ref_lateral", {})
-    rt = best.get("ref_tumble", {})
-    rp = best.get("ref_pitch_rms", {})
 
+    fieldnames = (
+        ["timestamp", "n_eval", "id", "cost"]
+        + [f"vel_{rid}" for rid in ref_ids]
+        + [dim.name for dim in space]
+    )
     with open(BEST_CSV_PATH, "a", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=_best_csv_fieldnames())
+        w = csv.DictWriter(f, fieldnames=fieldnames)
         row = {
             "timestamp": datetime.now().isoformat(timespec="seconds"),
-            "elapsed_min": f"{elapsed_min:.1f}",
             "n_eval": n_done,
             "id": best["id"],
             "cost": f"{best['cost']:.6f}",
         }
         for rid in ref_ids:
             row[f"vel_{rid}"] = f"{rv.get(rid, 0.0):.4f}"
-            row[f"lateral_{rid}"] = f"{rl.get(rid, 0.0):.6f}"
-            row[f"tumble_{rid}"] = f"{rt.get(rid, 0.0):.6f}"
-            row[f"pitch_rms_{rid}"] = f"{rp.get(rid, 0.0):.2f}"
         for dim in space:
             row[dim.name] = f"{best['params'][dim.name]:.8g}"
         w.writerow(row)
 
 
-def _print_best_so_far(all_results: list[dict], n_done: int, elapsed_min: float) -> None:
+def _print_best_so_far(all_results: list[dict], n_done: int) -> None:
     """Print best result and append to bests CSV if improved."""
     global _best_cost_so_far
     best = min(all_results, key=lambda r: r["cost"])
@@ -556,69 +494,23 @@ def _print_best_so_far(all_results: list[dict], n_done: int, elapsed_min: float)
 
     if is_new_best:
         _best_cost_so_far = best["cost"]
-        _append_best_csv(best, n_done, elapsed_min)
+        _append_best_csv(best, n_done)
 
 
 # ---------------------------------------------------------------------------
 # Main optimization loop
 # ---------------------------------------------------------------------------
 
-# ---------------------------------------------------------------------------
-# CMA-ES space mapping helpers
-# ---------------------------------------------------------------------------
-
-def _cmaes_space_info():
-    """Build CMA-ES bounds, initial point, and log-space flags from skopt space.
-
-    If CMAES_X0 is set, uses those values as the starting point (warm start).
-    Otherwise, starts from the midpoint of each dimension (cold start).
-    Log-uniform dimensions are optimized in log10-space for CMA-ES.
-    Returns (x0, lower, upper, is_log) all as lists of length len(space).
+def _run_batch_optimization(all_results: list[dict], pool: multiprocessing.Pool) -> OptResult:
     """
-    x0 = []
-    lower = []
-    upper = []
-    is_log = []
-    for dim in space:
-        lo, hi = dim.low, dim.high
-        if dim.prior == "log-uniform":
-            is_log.append(True)
-            lower.append(np.log10(lo))
-            upper.append(np.log10(hi))
-            if CMAES_X0 is not None:
-                x0.append(np.log10(CMAES_X0[dim.name]))
-            else:
-                x0.append(0.5 * (np.log10(lo) + np.log10(hi)))
-        else:
-            is_log.append(False)
-            lower.append(lo)
-            upper.append(hi)
-            if CMAES_X0 is not None:
-                x0.append(CMAES_X0[dim.name])
-            else:
-                x0.append(0.5 * (lo + hi))
-    return x0, lower, upper, is_log
+    Batch Bayesian optimization: propose BATCH_SIZE points, evaluate all references
+    in parallel, tell optimizer the costs, repeat.
 
-
-def _cmaes_to_real(x_internal, is_log):
-    """Map CMA-ES internal point back to real (original) space."""
-    point = []
-    for val, log_flag in zip(x_internal, is_log):
-        if log_flag:
-            point.append(10.0 ** val)
-        else:
-            point.append(val)
-    return point
-
-
-# ---------------------------------------------------------------------------
-# Optimizer factories (ask/tell wrappers)
-# ---------------------------------------------------------------------------
-
-def _create_skopt_optimizer():
-    """Create a scikit-optimize Bayesian optimizer."""
-    from skopt import Optimizer
-
+    Args:
+        all_results: Mutable list to accumulate results (replaces global).
+        pool: Pre-created multiprocessing pool.
+    """
+    # Build base estimator — noise must be configured on the GP object, not Optimizer
     estimator = BASE_ESTIMATOR
     if BASE_ESTIMATOR == "gp" and OPTIMIZER_NOISE is not None:
         from skopt.learning import GaussianProcessRegressor
@@ -629,6 +521,7 @@ def _create_skopt_optimizer():
             n_restarts_optimizer=2,
             normalize_y=True,
         )
+
     opt_kwargs = dict(
         dimensions=space,
         base_estimator=estimator,
@@ -638,78 +531,10 @@ def _create_skopt_optimizer():
     )
     if ACQ_FUNC_KWARGS:
         opt_kwargs["acq_func_kwargs"] = ACQ_FUNC_KWARGS
-
     optimizer = Optimizer(**opt_kwargs)
-
-    def ask(n_points):
-        pts = optimizer.ask(n_points=n_points)
-        if n_points == 1:
-            pts = [pts]
-        return pts
-
-    def tell(points, costs):
-        optimizer.tell(points, costs)
-
-    return ask, tell
-
-
-def _create_cmaes_optimizer():
-    """Create a CMA-ES optimizer (pycma) with log-space mapping."""
-    import cma
-
-    x0, lower, upper, is_log = _cmaes_space_info()
-
-    opts = {
-        "bounds": [lower, upper],
-        "seed": OPTIMIZER_RANDOM_STATE,
-        "popsize": BATCH_SIZE,
-        "verbose": -1,  # suppress pycma's own output
-        "tolfun": 1e-8,
-        "tolx": 1e-10,
-    }
-    es = cma.CMAEvolutionStrategy(x0, CMAES_SIGMA0, opts)
-
-    def ask(n_points):
-        """Ask returns popsize points (n_points is ignored — CMA-ES has fixed population)."""
-        internal_points = es.ask()
-        return [_cmaes_to_real(p, is_log) for p in internal_points]
-
-    def tell(points, costs):
-        """Tell maps points back to internal space before telling CMA-ES."""
-        internal_points = []
-        for pt in points:
-            internal = []
-            for val, log_flag in zip(pt, is_log):
-                internal.append(np.log10(val) if log_flag else val)
-            internal_points.append(internal)
-        es.tell(internal_points, costs)
-
-    return ask, tell
-
-
-def _run_batch_optimization(all_results: list[dict], pool: multiprocessing.Pool) -> OptResult:
-    """
-    Batch optimization loop: propose points, evaluate all references
-    in parallel, tell optimizer the costs, repeat.
-
-    Supports both skopt (Bayesian) and CMA-ES backends via ask/tell interface.
-
-    Args:
-        all_results: Mutable list to accumulate results (replaces global).
-        pool: Pre-created multiprocessing pool.
-    """
-    if OPTIMIZER_BACKEND == "cmaes":
-        ask, tell = _create_cmaes_optimizer()
-        warm = "warm-start" if CMAES_X0 is not None else "cold-start"
-        print(f"  Backend: CMA-ES (sigma0={CMAES_SIGMA0}, popsize={BATCH_SIZE}, {warm})")
-    else:
-        ask, tell = _create_skopt_optimizer()
-        print(f"  Backend: skopt ({BASE_ESTIMATOR}, acq={ACQ_FUNC})")
-
     n_done = 0
-    batch_num = 0
-    t_run_start = time.perf_counter()
 
+    batch_num = 0
     while n_done < N_CALLS:
         n_this = min(BATCH_SIZE, N_CALLS - n_done)
         batch_num += 1
@@ -718,7 +543,9 @@ def _run_batch_optimization(all_results: list[dict], pool: multiprocessing.Pool)
         print(f"\n--- Batch {batch_num}: asking for {n_this} points ({n_done + 1}\u2013{n_done + n_this} / {N_CALLS}), {n_this * len(_REF_ROWS) * n_trials} tasks ---")
 
         t_ask = time.perf_counter()
-        points = ask(n_this)
+        points = optimizer.ask(n_points=n_this)
+        if n_this == 1:
+            points = [points]
         t_ask = time.perf_counter() - t_ask
 
         # One reference row per process: (point_index, point, ref_row)
@@ -736,6 +563,7 @@ def _run_batch_optimization(all_results: list[dict], pool: multiprocessing.Pool)
             for trial_idx in range(n_trials)
         ]
         t_sim = time.perf_counter()
+        # Queue-style scheduling to keep workers busy for heterogeneous task runtimes.
         scene_results = list(pool.imap_unordered(_evaluate_one_scene, tasks, chunksize=1))
         t_sim = time.perf_counter() - t_sim
 
@@ -745,7 +573,7 @@ def _run_batch_optimization(all_results: list[dict], pool: multiprocessing.Pool)
         t_agg = time.perf_counter() - t_agg
 
         t_tell = time.perf_counter()
-        tell(points, costs)
+        optimizer.tell(points, costs)
         t_tell = time.perf_counter() - t_tell
 
         t_csv = time.perf_counter()
@@ -763,11 +591,9 @@ def _run_batch_optimization(all_results: list[dict], pool: multiprocessing.Pool)
             t_verbose = time.perf_counter() - t_verbose
 
         batch_wall_actual = time.perf_counter() - t_batch_start
-        elapsed = time.perf_counter() - t_run_start
-        elapsed_min = elapsed / 60.0
         batch_wall_sum = t_ask + t_sim + t_agg + t_tell + t_csv + t_verbose
         overhead = batch_wall_actual - batch_wall_sum
-        print(f"  Batch wall: {batch_wall_actual:.1f}s | Elapsed: {elapsed_min:.1f}min | Costs: min={min(costs):.4f}, max={max(costs):.4f}")
+        print(f"  Batch wall: {batch_wall_actual:.1f}s (profiled: {batch_wall_sum:.1f}s, overhead: {overhead:.2f}s) | Costs: min={min(costs):.4f}, max={max(costs):.4f}")
 
         if PROFILE_BATCH:
             parts = f"ask={t_ask:.3f}s sim={t_sim:.2f}s agg={t_agg:.3f}s tell={t_tell:.3f}s csv={t_csv:.3f}s"
@@ -775,7 +601,7 @@ def _run_batch_optimization(all_results: list[dict], pool: multiprocessing.Pool)
                 parts += f" verbose={t_verbose:.3f}s"
             print(f"  Profile: {parts}")
 
-        _print_best_so_far(all_results, n_done, elapsed_min)
+        _print_best_so_far(all_results, n_done)
 
     best = min(all_results, key=lambda r: r["cost"])
     return OptResult(
@@ -800,23 +626,24 @@ if __name__ == "__main__":
             f"pitch_weight={row.get('pitch_weight', PITCH_RMS_WEIGHT)}"
         )
 
-    # Create run directory and save config snapshot
-    import shutil
-    run_tag = datetime.now().strftime("%Y%m%dT%H%M%S")
-    run_dir_results = pathlib.Path("results") / run_tag
-    run_dir_results.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(pathlib.Path(__file__).parent / "config.py", run_dir_results / "config.py")
-    print(f"  Run directory: {run_dir_results}/")
+    # Write CSV headers once (overwrite from previous runs)
+    try:
+        with open(CSV_PATH, "w", newline="") as f:
+            csv.DictWriter(f, fieldnames=csv_fieldnames()).writeheader()
+    except Exception as e:
+        print(f"  [Warning] Could not create CSV: {e}")
 
-    # Write CSVs directly into run directory
-    global CSV_PATH, BEST_CSV_PATH
-    CSV_PATH = str(run_dir_results / "multi_optimization_results.csv")
-    BEST_CSV_PATH = str(run_dir_results / "optimization_bests.csv")
-
-    with open(CSV_PATH, "w", newline="") as f:
-        csv.DictWriter(f, fieldnames=csv_fieldnames()).writeheader()
-    with open(BEST_CSV_PATH, "w", newline="") as f:
-        csv.DictWriter(f, fieldnames=_best_csv_fieldnames()).writeheader()
+    ref_ids = [row["id"] for row in reference_rows()]
+    best_fieldnames = (
+        ["timestamp", "n_eval", "id", "cost"]
+        + [f"vel_{rid}" for rid in ref_ids]
+        + [dim.name for dim in space]
+    )
+    try:
+        with open(BEST_CSV_PATH, "w", newline="") as f:
+            csv.DictWriter(f, fieldnames=best_fieldnames).writeheader()
+    except Exception as e:
+        print(f"  [Warning] Could not create bests CSV: {e}")
 
     try:
         multiprocessing.set_start_method("spawn", force=True)
@@ -851,12 +678,16 @@ if __name__ == "__main__":
     for dim, value in zip(space, result.x):
         print(f"  {dim.name}: {value:.6f}")
 
-    # Record top 3 rollouts into the run results directory
+    # Record top 3 rollouts
     print("\n--- Recording Top 3 Best Rollouts ---")
     import importlib
     sim_module = importlib.import_module(SIM_MODULE)
 
     sorted_results = sorted(all_results, key=lambda r: r["cost"])
+    run_stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    replay_root = pathlib.Path("top_3_rollouts_multi") / run_stamp
+    replay_root.mkdir(parents=True, exist_ok=True)
+    print(f"Replay output root: {replay_root}")
 
     for i in range(min(3, len(sorted_results))):
         result_data = sorted_results[i]
@@ -870,19 +701,19 @@ if __name__ == "__main__":
             [result_data["params"][dim.name] for dim in space]
         )
 
+        run_dir = replay_root / f"rank_{rank:02d}_id_{result_data['id']}"
+        run_dir.mkdir(parents=True, exist_ok=True)
         for ref_row in _REF_ROWS:
             scene = ref_row["scene"]
             mjcf_path = MJCF_PATHS[scene]
             ref_id = ref_row["id"]
-            video_path = run_dir_results / f"rank_{rank:02d}_{ref_id}.mp4"
+            video_path = run_dir / f"{ref_id}.mp4"
             print(f"  Recording video for {ref_id} to {video_path}...")
             sim_params_scene = dict(sim_params)
             sim_params_scene["drive_freq"] = ref_row.get("ctrl_freq", DEFAULT_CTRL_FREQ)
             sim_module.run_simulation(
                 sim_params_scene,
                 mjcf_path=mjcf_path,
-                sim_duration=5.0,
+                sim_duration=10.0,
                 record_path=str(video_path),
             )
-
-    print(f"\n  Results saved to {run_dir_results}/")
