@@ -90,7 +90,7 @@ REFERENCE_DATA: list[dict[str, Any]] = [
 # ---------------------------------------------------------------------------
 # Optimization hyper-parameters
 # ---------------------------------------------------------------------------
-N_CALLS = 1200  # total optimization iterations
+N_CALLS = 600  # total optimization iterations
 SIM_DURATION = 3.0  # seconds per simulation run
 SIMULATION_TIMEOUT = 35  # wall-clock seconds per worker
 ROLLOUTS_PER_SCENE = 1  # sims per scene per iteration (>1 only for noisy sims)
@@ -112,31 +112,15 @@ N_INITIAL_POINTS = 15
 OPTIMIZER_NOISE = "gaussian"
 OPTIMIZER_RANDOM_STATE = 42
 # Optimizer backend: "skopt" (Bayesian GP/RF) or "cmaes" (CMA Evolution Strategy)
-OPTIMIZER_BACKEND = "cmaes"
-# OPTIMIZER_BACKEND = "skopt"
+# OPTIMIZER_BACKEND = "cmaes"
+OPTIMIZER_BACKEND = "skopt"
 # CMA-ES initial step size (sigma0) — fraction of search range, typically 0.3–0.5
-CMAES_SIGMA0 = 0.3  # broad exploration
-# CMAES_SIGMA0 = 0.15  # tighter local search around 0.868 best
+# CMAES_SIGMA0 = 0.3  # broad exploration
+CMAES_SIGMA0 = 0.15  # tighter local search around 0.497 best
 # CMA-ES warm-start: set to a {param_name: value} dict to start from a known good point
 # instead of the space midpoint.  None = start from midpoint (cold start).
 # Paste best params from optimization_bests.csv to warm-start the next run.
 CMAES_X0: dict[str, float] | None = None
-# Warm-start from broad-space CMA-ES 600-eval run (cost 0.868):
-# CMAES_X0 = {
-#     "sliding_friction": 0.026465921,
-#     "torsional_friction": 0.00011748028,
-#     "rolling_friction": 2.9694848e-05,
-#     "solref_timeconst": 0.0010863371,
-#     "solref_dampratio": 1.5668709,
-#     "solimp_dmin": 0.93365456,
-#     "solimp_dmax": 0.99133385,
-#     "solimp_width": 0.0028699653,
-#     "solimp_midpoint": 0.82788796,
-#     "solimp_power": 1.949062,
-#     "magnetic_moment_fudge": 0.51384828,
-#     "magnetic_field_fudge": 1.0973323,
-#     "dof_damping": 3.7071403e-10,
-# }
 # Warm-start from cold-start CMA-ES 600-eval run (cost 0.820):
 # CMAES_X0 = {
 #     "sliding_friction": 0.017729281,
@@ -178,12 +162,10 @@ TUMBLE_PENALTY_SCALE = 0.1  # per-frame penalty when uprightness < threshold
 COST_FAILURE = 1e6  # cost for failed / empty trajectory
 VELOCITY_COST_WEIGHT = 5.0
 TUMBLE_COST_WEIGHT = 1.0
-LATERAL_COST_WEIGHT = 5.0  # penalizes lateral (y) displacement squared
+LATERAL_COST_WEIGHT = 1.0  # penalizes lateral (y) displacement squared
 VELOCITY_VARIANCE_WEIGHT = 2.0  # penalizes uneven velocity errors across references
 PITCH_RMS_TARGET_DEG = 0.0  # target RMS pitch (deg); set when you have reference
 PITCH_RMS_WEIGHT = 0.0  # set >0 to include RMS pitch in objective
-YAW_THRESHOLD_DEG = 60.0  # final heading deviation beyond this triggers penalty
-YAW_COST_WEIGHT = 1.0  # weight for yaw spin-out penalty
 
 # ---------------------------------------------------------------------------
 # Search space (13 dimensions) — narrowed from 200-eval run analysis
