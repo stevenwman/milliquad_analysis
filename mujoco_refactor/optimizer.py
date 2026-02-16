@@ -81,17 +81,8 @@ class OptResult(NamedTuple):
 _REF_ROWS = reference_rows()
 if not _REF_ROWS:
     raise ValueError("No reference rows defined. Populate REFERENCE_DATA in config.py.")
-_SCENE_TARGETS = {}
-for _row in _REF_ROWS:
-    _scene = _row["scene"]
-    _w = float(_row.get("weight", 1.0))
-    _SCENE_TARGETS.setdefault(_scene, {"num": 0.0, "den": 0.0})
-    _SCENE_TARGETS[_scene]["num"] += _w * float(_row["speed"])
-    _SCENE_TARGETS[_scene]["den"] += _w
-_SCENE_TARGETS = {
-    s: (v["num"] / v["den"] if v["den"] > 0 else 0.0)
-    for s, v in _SCENE_TARGETS.items()
-}
+# Collision-free ref index for deterministic jitter seeds.
+_REF_INDEX_BY_ID: dict[str, int] = {row["id"]: i for i, row in enumerate(_REF_ROWS)}
 
 # ---------------------------------------------------------------------------
 # Cost function
@@ -260,10 +251,12 @@ def _evaluate_one_scene(args):
     weight = ref_row.get("weight", 1.0)
     sim_params["drive_freq"] = ref_row.get("ctrl_freq", DEFAULT_CTRL_FREQ)
 
-    # Deterministic jitter seeds (stable across processes).
-    ref_idx = sum(ord(c) for c in ref_row["id"]) % 1000
+    # Deterministic jitter seeds (collision-free across refs/trials/points).
+    n_refs = len(_REF_ROWS)
+    n_trials = max(1, INIT_JITTER_TRIALS)
+    ref_idx = _REF_INDEX_BY_ID[ref_row["id"]]
     t0 = time.perf_counter()
-    seed = INIT_JITTER_SEED + 100000 * global_point_index + 1000 * ref_idx + trial_index
+    seed = INIT_JITTER_SEED + (global_point_index * n_refs + ref_idx) * n_trials + trial_index
     trajectory = _sim.run_simulation(
         sim_params,
         mjcf_path=mjcf_path,
@@ -449,9 +442,9 @@ def _aggregate_scene_results(points: list, scene_results: list) -> list[dict]:
 # CSV output
 # ---------------------------------------------------------------------------
 
-def _append_result_to_csv(res: dict[str, Any]) -> None:
+def _append_result_to_csv(res: dict[str, Any], elapsed_min: float) -> None:
     """Append one result row to the CSV."""
-    row = {"id": res["id"], "cost": res["cost"]}
+    row = {"id": res["id"], "cost": res["cost"], "elapsed_min": f"{elapsed_min:.1f}"}
     for scene in MJCF_PATHS:
         row[f"velocity_{scene}"] = res["scene_avg_velocities"].get(scene, 0)
         row[f"cost_{scene}"] = res["scene_costs"].get(scene, 0)
@@ -463,6 +456,8 @@ def _append_result_to_csv(res: dict[str, Any]) -> None:
         row[f"yaw_{rid}"] = res.get("ref_yaw", {}).get(rid, 0)
         row[f"pitch_rms_{rid}"] = res.get("ref_pitch_rms", {}).get(rid, 0)
     row.update(res["params"])
+    p = res["params"]
+    row["solimp_dmax"] = p["solimp_dmin"] + p["solimp_delta_d"] * (0.9999 - p["solimp_dmin"])
     try:
         with open(CSV_PATH, "a", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=csv_fieldnames())
@@ -522,6 +517,7 @@ def _best_csv_fieldnames() -> list[str]:
         + [f"yaw_{rid}" for rid in ref_ids]
         + [f"pitch_rms_{rid}" for rid in ref_ids]
         + [dim.name for dim in space]
+        + ["solimp_dmax"]  # derived from delta_d
     )
 
 
@@ -553,6 +549,8 @@ def _append_best_csv(best: dict, n_done: int, elapsed_min: float) -> None:
             row[f"pitch_rms_{rid}"] = f"{rp.get(rid, 0.0):.2f}"
         for dim in space:
             row[dim.name] = f"{best['params'][dim.name]:.8g}"
+        bp = best["params"]
+        row["solimp_dmax"] = f"{bp['solimp_dmin'] + bp['solimp_delta_d'] * (0.9999 - bp['solimp_dmin']):.8g}"
         w.writerow(row)
 
 
@@ -740,7 +738,7 @@ def _run_batch_optimization(all_results: list[dict], pool: multiprocessing.Pool)
                 point,
                 ref_row,
                 trial_idx,
-                (i == 0 and ref_idx == 0 and trial_idx == 0),
+                False,  # suppress per-sim progress output
                 n_done + i,  # global point index for unique jitter seeds
             )
             for i, point in enumerate(points)
@@ -761,9 +759,10 @@ def _run_batch_optimization(all_results: list[dict], pool: multiprocessing.Pool)
         t_tell = time.perf_counter() - t_tell
 
         t_csv = time.perf_counter()
+        elapsed_min = (time.perf_counter() - t_run_start) / 60.0
         for r in results:
             all_results.append(r)
-            _append_result_to_csv(r)
+            _append_result_to_csv(r, elapsed_min)
         t_csv = time.perf_counter() - t_csv
 
         n_done += n_this
@@ -860,17 +859,20 @@ if __name__ == "__main__":
     best_cost = result.fun
     print(f"Lowest Cost Found: {best_cost:.6f}")
     print("Best Parameters:")
-    for dim, value in zip(space, result.x):
-        print(f"  {dim.name}: {value:.6f}")
+    best_params = {dim.name: value for dim, value in zip(space, result.x)}
+    for name, value in best_params.items():
+        print(f"  {name}: {value:.6f}")
+    dmax = best_params["solimp_dmin"] + best_params["solimp_delta_d"] * (0.9999 - best_params["solimp_dmin"])
+    print(f"  solimp_dmax: {dmax:.6f}  (derived)")
 
-    # Record top 3 rollouts into the run results directory
-    print("\n--- Recording Top 3 Best Rollouts ---")
+    # Record top 1 rollout into the run results directory
+    print("\n--- Recording Best Rollout ---")
     import importlib
     sim_module = importlib.import_module(SIM_MODULE)
 
     sorted_results = sorted(all_results, key=lambda r: r["cost"])
 
-    for i in range(min(3, len(sorted_results))):
+    for i in range(min(1, len(sorted_results))):
         result_data = sorted_results[i]
         rank = i + 1
 

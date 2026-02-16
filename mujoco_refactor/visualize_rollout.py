@@ -106,8 +106,8 @@ def compute_locomotion_metrics(
         return None
 
     # Check that we have the needed fields
-    if "tau_ext" not in active[0] or "omega" not in active[0]:
-        print("Warning: Trajectory missing tau_ext/omega — was it run without step_cache?")
+    if "tau_ext" not in active[0] or "tau_int" not in active[0] or "omega" not in active[0]:
+        print("Warning: Trajectory missing tau_ext/tau_int/omega — was it run without step_cache?")
         return None
 
     n = len(active) - 1
