@@ -26,7 +26,7 @@ INITIAL_Z_HEIGHT = 0.002  # meters above ground
 INITIAL_QUATERNION = (0, 0, 1, 0)  # 180° rotation about y-axis (w, x, y, z)
 INITIAL_LEG_ANGLES = np.pi  # all legs start at π radians
 INIT_YAW_JITTER_DEG = 2  # max +/- yaw jitter (deg) applied at init; 0 = off
-INIT_JITTER_TRIALS = 3  # number of jittered trials per point (>=1)
+INIT_JITTER_TRIALS = 2  # number of jittered trials per point (>=1)
 INIT_JITTER_SEED = 12345  # base seed for deterministic jitter
 
 # Body indexing: leg bodies are offset from leg index (0-3) by this amount
@@ -90,14 +90,11 @@ REFERENCE_DATA: list[dict[str, Any]] = [
 # ---------------------------------------------------------------------------
 # Optimization hyper-parameters
 # ---------------------------------------------------------------------------
-N_CALLS = 2400  # total optimization iterations
+N_CALLS = 600  # total optimization iterations
 SIM_DURATION = 3.0  # seconds per simulation run
 SIMULATION_TIMEOUT = 35  # wall-clock seconds per worker
 ROLLOUTS_PER_SCENE = 1  # sims per scene per iteration (>1 only for noisy sims)
 BATCH_SIZE = 8  # points proposed per optimizer step
-# NOTE: CMA-ES ask() always returns BATCH_SIZE points regardless of remaining
-# budget. N_CALLS should be a multiple of BATCH_SIZE to avoid over-evaluation.
-# TODO: implement explicit remainder handling in the CMA-ES wrapper.
 VERBOSE_BATCH = True
 PROFILE_BATCH = True
 # "rf" = random forest (fast ask/tell); "gp" = Gaussian process (slow at high n)
@@ -113,32 +110,30 @@ ACQ_FUNC_KWARGS: dict = {"kappa": 2.5}
 N_INITIAL_POINTS = 15
 # Observation noise: "gaussian" (auto-estimated), float (fixed variance), or None
 OPTIMIZER_NOISE = "gaussian"
-OPTIMIZER_RANDOM_STATE = 69420
+OPTIMIZER_RANDOM_STATE = 42
 # Optimizer backend: "skopt" (Bayesian GP/RF) or "cmaes" (CMA Evolution Strategy)
 OPTIMIZER_BACKEND = "cmaes"
 # OPTIMIZER_BACKEND = "skopt"
 # CMA-ES initial step size (sigma0) — fraction of search range, typically 0.3–0.5
 # CMAES_SIGMA0 = 0.3  # broad exploration
-# CMAES_SIGMA0 = 0.15  # tighter local search around lateral best
-# CMAES_SIGMA0 = 0.5  # wide exploration to escape stagnation
-CMAES_SIGMA0 = 0.5  # wide exploration with permissive bounds
+CMAES_SIGMA0 = 0.15  # tighter local search around lateral best
 # CMA-ES warm-start: set to a {param_name: value} dict to start from a known good point
 # instead of the space midpoint.  None = start from midpoint (cold start).
 # Paste best params from optimization_bests.csv to warm-start the next run.
 CMAES_X0: dict[str, float] | None = {
-    "sliding_friction": 0.034909722,
-    "torsional_friction": 0.00012293471,
-    "rolling_friction": 0.00014766098,
-    "solref_timeconst": 0.0016649826,
-    "solref_dampratio": 1.5467555,
-    "solimp_dmin": 0.91096702,
-    "solimp_delta_d": 0.44003,  # back-computed: (0.950 - 0.911) / (0.9999 - 0.911)
-    "solimp_width": 0.00092664361,
-    "solimp_midpoint": 0.27701405,
-    "solimp_power": 4.5849982,
-    "magnetic_moment_fudge": 1.0,  # trust factory measurement
-    "magnetic_field_fudge": 1.0,  # trust factory measurement
-    "dof_damping": 4.6975979e-10,
+    "sliding_friction": 0.0057445179,
+    "torsional_friction": 0.0015312527,
+    "rolling_friction": 0.00086766835,
+    "solref_timeconst": 0.0010061231,
+    "solref_dampratio": 1.3938171,
+    "solimp_dmin": 0.84222872,
+    "solimp_dmax": 0.95340786,
+    "solimp_width": 0.0054692591,
+    "solimp_midpoint": 0.84388944,
+    "solimp_power": 4.6007001,
+    "magnetic_moment_fudge": 0.63346397,
+    "magnetic_field_fudge": 1.2283801,
+    "dof_damping": 6.4743826e-10,
 }
 # Warm-start from broad-space CMA-ES 600-eval run (cost 0.868):
 # CMAES_X0 = {
@@ -148,7 +143,7 @@ CMAES_X0: dict[str, float] | None = {
 #     "solref_timeconst": 0.0010863371,
 #     "solref_dampratio": 1.5668709,
 #     "solimp_dmin": 0.93365456,
-#     "solimp_delta_d": 0.87069,  # back-computed: (0.991 - 0.934) / (0.9999 - 0.934)
+#     "solimp_dmax": 0.99133385,
 #     "solimp_width": 0.0028699653,
 #     "solimp_midpoint": 0.82788796,
 #     "solimp_power": 1.949062,
@@ -202,53 +197,59 @@ VELOCITY_VARIANCE_WEIGHT = 2.0  # penalizes uneven velocity errors across refere
 PITCH_RMS_TARGET_DEG = 0.0  # target RMS pitch (deg); set when you have reference
 PITCH_RMS_WEIGHT = 0.0  # set >0 to include RMS pitch in objective
 YAW_THRESHOLD_DEG = 60.0  # final heading deviation beyond this triggers penalty
-YAW_COST_WEIGHT = 1.0  # yaw spin-out penalty enabled
+YAW_COST_WEIGHT = 0.0  # disabled for this run; enable next run
 
 # ---------------------------------------------------------------------------
 # Search space (13 dimensions) — narrowed from 200-eval run analysis
 # ---------------------------------------------------------------------------
-# # Narrowed ranges (run 20260215T003040, best 0.684):
-# space: list[Real] = [
-#     Real(1e-5, 0.8, "log-uniform", name="sliding_friction"),
-#     Real(1e-5, 0.1, "log-uniform", name="torsional_friction"),
-#     Real(1e-5, 0.1, "log-uniform", name="rolling_friction"),
-#     Real(0.001, 0.1, "log-uniform", name="solref_timeconst"),
-#     Real(0.1, 2.0, "uniform", name="solref_dampratio"),
-#     Real(0.8, 0.99, "uniform", name="solimp_dmin"),
-#     Real(0.01, 0.99, "uniform", name="solimp_delta_d"),  # dmax = dmin + delta_d * (0.9999 - dmin)
-#     Real(1e-4, 1e-2, "log-uniform", name="solimp_width"),
-#     Real(0.1, 0.9, "uniform", name="solimp_midpoint"),
-#     Real(1.0, 6.0, "uniform", name="solimp_power"),
-#     Real(0.5, 1.5, "uniform", name="magnetic_moment_fudge"),
-#     Real(0.5, 1.5, "uniform", name="magnetic_field_fudge"),
-#     Real(7e-12, 7e-9, "log-uniform", name="dof_damping"),
-# ]
-
-# ---------------------------------------------------------------------------
-# Search space — maximally permissive MuJoCo-supported ranges
-# ---------------------------------------------------------------------------
-# Friction: [0, inf) but log-uniform needs positive lower bound
-# solref_timeconst: >= 2*timestep (0.001s at 2kHz)
-# solref_dampratio: > 0
-# solimp_dmin/dmax: (0, 1), must satisfy dmin < dmax
-# solimp_width: > 0
-# solimp_midpoint: [0.01, 0.99]
-# solimp_power: >= 1
+# Broad ranges (run 20260215T003040, best 0.684):
 space: list[Real] = [
-    Real(1e-6, 10.0, "log-uniform", name="sliding_friction"),
-    Real(1e-6, 1.0, "log-uniform", name="torsional_friction"),
-    Real(1e-6, 1.0, "log-uniform", name="rolling_friction"),
-    Real(0.001, 1.0, "log-uniform", name="solref_timeconst"),
-    Real(0.01, 10.0, "log-uniform", name="solref_dampratio"),
-    Real(0.001, 0.99, "uniform", name="solimp_dmin"),
-    Real(0.01, 0.99, "uniform", name="solimp_delta_d"),  # dmax = dmin + delta_d * (0.9999 - dmin)
-    Real(1e-6, 0.1, "log-uniform", name="solimp_width"),
-    Real(0.01, 0.99, "uniform", name="solimp_midpoint"),
-    Real(1.0, 10.0, "uniform", name="solimp_power"),
-    Real(0.75, 1.25, "uniform", name="magnetic_moment_fudge"),
-    Real(0.75, 1.25, "uniform", name="magnetic_field_fudge"),
-    Real(1e-14, 1e-6, "log-uniform", name="dof_damping"),
+    Real(1e-5, 0.8, "log-uniform", name="sliding_friction"),
+    Real(1e-5, 0.1, "log-uniform", name="torsional_friction"),
+    Real(1e-5, 0.1, "log-uniform", name="rolling_friction"),
+    Real(0.001, 0.1, "log-uniform", name="solref_timeconst"),
+    Real(0.1, 2.0, "uniform", name="solref_dampratio"),
+    Real(0.8, 0.99, "uniform", name="solimp_dmin"),
+    Real(0.95, 0.999, "uniform", name="solimp_dmax"),
+    Real(1e-4, 1e-2, "log-uniform", name="solimp_width"),
+    Real(0.1, 0.9, "uniform", name="solimp_midpoint"),
+    Real(1.0, 6.0, "uniform", name="solimp_power"),
+    Real(0.5, 1.5, "uniform", name="magnetic_moment_fudge"),
+    Real(0.5, 1.5, "uniform", name="magnetic_field_fudge"),
+    Real(7e-12, 7e-9, "log-uniform", name="dof_damping"),
 ]
+# Narrowed ranges (run 2 — params hit bounds, commented out):
+# space_narrow: list[Real] = [
+#     Real(0.01, 0.15, "log-uniform", name="sliding_friction"),       # ← hit upper
+#     Real(0.005, 0.1, "log-uniform", name="torsional_friction"),
+#     Real(1e-5, 0.05, "log-uniform", name="rolling_friction"),
+#     Real(0.001, 0.01, "uniform", name="solref_timeconst"),
+#     Real(1.0, 2.0, "uniform", name="solref_dampratio"),
+#     Real(0.8, 0.9, "uniform", name="solimp_dmin"),
+#     Real(0.95, 0.999, "uniform", name="solimp_dmax"),
+#     Real(5e-5, 1e-3, "log-uniform", name="solimp_width"),
+#     Real(0.1, 0.7, "uniform", name="solimp_midpoint"),
+#     Real(2.0, 5.0, "uniform", name="solimp_power"),                 # ← hit upper
+#     Real(0.7, 1.3, "uniform", name="magnetic_moment_fudge"),        # ← hit lower
+#     Real(0.5, 1.3, "uniform", name="magnetic_field_fudge"),         # ← hit upper
+#     Real(1e-10, 2e-9, "log-uniform", name="dof_damping"),           # ← hit upper
+# ]
+# Narrow ranges with expanded bounds (produced 0.497 best):
+# space: list[Real] = [
+#     Real(0.01, 0.4, "log-uniform", name="sliding_friction"),
+#     Real(0.005, 0.1, "log-uniform", name="torsional_friction"),
+#     Real(1e-5, 0.05, "log-uniform", name="rolling_friction"),
+#     Real(0.001, 0.01, "log-uniform", name="solref_timeconst"),
+#     Real(1.0, 2.0, "uniform", name="solref_dampratio"),
+#     Real(0.8, 0.9, "uniform", name="solimp_dmin"),
+#     Real(0.95, 0.999, "uniform", name="solimp_dmax"),
+#     Real(5e-5, 1e-3, "log-uniform", name="solimp_width"),
+#     Real(0.1, 0.7, "uniform", name="solimp_midpoint"),
+#     Real(2.0, 8.0, "uniform", name="solimp_power"),
+#     Real(0.4, 1.3, "uniform", name="magnetic_moment_fudge"),
+#     Real(0.5, 2.0, "uniform", name="magnetic_field_fudge"),
+#     Real(1e-12, 1e-7, "log-uniform", name="dof_damping"),
+# ]
 
 # ---------------------------------------------------------------------------
 # CSV output
@@ -299,7 +300,7 @@ def reference_ids() -> list[str]:
 
 def csv_fieldnames() -> list[str]:
     """Column names for the results CSV."""
-    param_names = [dim.name for dim in space] + ["solimp_dmax"]  # derived from delta_d
+    param_names = [dim.name for dim in space]
     scene_cost_names = [f"cost_{scene}" for scene in MJCF_PATHS]
     scene_vel_names = [f"velocity_{scene}" for scene in MJCF_PATHS]
     rids = reference_ids()
@@ -310,7 +311,7 @@ def csv_fieldnames() -> list[str]:
     ref_yaw_names = [f"yaw_{rid}" for rid in rids]
     ref_pitch_names = [f"pitch_rms_{rid}" for rid in rids]
     return (
-        ["id", "cost", "elapsed_min"]
+        ["id", "cost"]
         + scene_vel_names + scene_cost_names
         + ref_vel_names + ref_cost_names
         + ref_lateral_names + ref_tumble_names + ref_yaw_names + ref_pitch_names
@@ -344,7 +345,7 @@ def sim_params_from_point(point: list[float]) -> dict[str, Any]:
         "solref": [params["solref_timeconst"], params["solref_dampratio"]],
         "solimp": [
             params["solimp_dmin"],
-            params["solimp_dmin"] + params["solimp_delta_d"] * (0.9999 - params["solimp_dmin"]),
+            params["solimp_dmax"],
             params["solimp_width"],
             params["solimp_midpoint"],
             params["solimp_power"],
