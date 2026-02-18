@@ -247,8 +247,8 @@ space: list[Real] = [
     Real(1e-7, 1, "log-uniform", name="solimp_width"),
     Real(0.01, 0.99, "uniform", name="solimp_midpoint"),
     Real(1.0, 10.0, "uniform", name="solimp_power"),
-    Real(0.8, 1.2, "uniform", name="magnetic_moment_fudge"),
-    Real(0.8, 1.2, "uniform", name="magnetic_field_fudge"),
+    Real(0.5, 2.0, "log-uniform", name="magnetic_moment_fudge"),
+    Real(0.8, 1.2, "log-uniform", name="magnetic_field_fudge"),
     Real(1e-14, 1e-6, "log-uniform", name="dof_damping"),
 ]
 

@@ -2,13 +2,38 @@
 """Pretty-print optimization_bests.csv as readable tables."""
 
 import csv
+import math
 import pathlib
 import sys
-from config import reference_rows
+from config import reference_rows, space
 
 ref_rows = reference_rows()
 ref_ids = [r["id"] for r in ref_rows]
 targets = {r["id"]: r["speed"] for r in ref_rows}
+
+# Build bounds lookup from search space for bound-pushing detection
+_BOUNDS = {dim.name: (dim.low, dim.high) for dim in space}
+# Include derived solimp_dmax (no bounds to check)
+_PARAM_NAMES = [dim.name for dim in space] + ["solimp_dmax"]
+
+def _bound_flag(name: str, value: float) -> str:
+    """Return a flag string if value is near a search space bound."""
+    if name not in _BOUNDS:
+        return ""
+    lo, hi = _BOUNDS[name]
+    # For log-uniform params, use log-space fraction; for uniform, use linear
+    dim = next(d for d in space if d.name == name)
+    is_log = dim.prior == "log-uniform"
+    if is_log and lo > 0 and hi > 0 and value > 0:
+        log_lo, log_hi, log_v = math.log(lo), math.log(hi), math.log(value)
+        frac = (log_v - log_lo) / (log_hi - log_lo)
+    else:
+        frac = (value - lo) / (hi - lo) if hi != lo else 0.5
+    if frac <= 0.02:
+        return " << LO"
+    if frac >= 0.98:
+        return " >> HI"
+    return ""
 
 # Default: latest results dir; override with explicit path as argv[1]
 if len(sys.argv) > 1:
@@ -66,6 +91,15 @@ for r in rows:
                 print(f"  {rid:<18} {t:>6.3f}  {s:>6.3f}  {d:>+7.1f}cs {dpct:>+4.0f}%  {tmb:>6.4f}  {lat:>6.1f}cm  {pit:>4.1f}°")
         else:
             print(f"  {rid:<18} {t:>6.3f}  {s:>6.3f}  {d:>+7.1f}cs {dpct:>+4.0f}%")
+    # Show params for the last (current best) entry
+    if r is rows[-1]:
+        print(f"\n  {'param':<28} {'value':>14}  {'flag'}")
+        print(f"  {'-' * 50}")
+        for pname in _PARAM_NAMES:
+            if pname in r:
+                val = float(r[pname])
+                flag = _bound_flag(pname, val)
+                print(f"  {pname:<28} {val:>14.6g}  {flag}")
     print()
 
 print(f"Total: {len(rows)} best(s) recorded")

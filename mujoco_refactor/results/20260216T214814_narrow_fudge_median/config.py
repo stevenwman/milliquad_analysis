@@ -125,23 +125,21 @@ CMAES_SIGMA0 = 0.5  # wide exploration with permissive bounds
 # CMA-ES warm-start: set to a {param_name: value} dict to start from a known good point
 # instead of the space midpoint.  None = start from midpoint (cold start).
 # Paste best params from optimization_bests.csv to warm-start the next run.
-CMAES_X0: dict[str, float] | None = None  # cold start — midpoint of search space
-# Warm-start from narrow-fudge median run (cost 0.482):
-# CMAES_X0 = {
-#     "sliding_friction": 0.034909722,
-#     "torsional_friction": 0.00012293471,
-#     "rolling_friction": 0.00014766098,
-#     "solref_timeconst": 0.0016649826,
-#     "solref_dampratio": 1.5467555,
-#     "solimp_dmin": 0.91096702,
-#     "solimp_delta_d": 0.44003,
-#     "solimp_width": 0.00092664361,
-#     "solimp_midpoint": 0.27701405,
-#     "solimp_power": 4.5849982,
-#     "magnetic_moment_fudge": 1.0,
-#     "magnetic_field_fudge": 1.0,
-#     "dof_damping": 4.6975979e-10,
-# }
+CMAES_X0: dict[str, float] | None = {
+    "sliding_friction": 0.034909722,
+    "torsional_friction": 0.00012293471,
+    "rolling_friction": 0.00014766098,
+    "solref_timeconst": 0.0016649826,
+    "solref_dampratio": 1.5467555,
+    "solimp_dmin": 0.91096702,
+    "solimp_delta_d": 0.44003,  # back-computed: (0.950 - 0.911) / (0.9999 - 0.911)
+    "solimp_width": 0.00092664361,
+    "solimp_midpoint": 0.27701405,
+    "solimp_power": 4.5849982,
+    "magnetic_moment_fudge": 1.0,  # log-uniform midpoint of [0.1, 10]
+    "magnetic_field_fudge": 1.0,  # log-uniform midpoint of [0.1, 10]
+    "dof_damping": 4.6975979e-10,
+}
 # Warm-start from broad-space CMA-ES 600-eval run (cost 0.868):
 # CMAES_X0 = {
 #     "sliding_friction": 0.026465921,
@@ -247,8 +245,8 @@ space: list[Real] = [
     Real(1e-7, 1, "log-uniform", name="solimp_width"),
     Real(0.01, 0.99, "uniform", name="solimp_midpoint"),
     Real(1.0, 10.0, "uniform", name="solimp_power"),
-    Real(0.8, 1.2, "uniform", name="magnetic_moment_fudge"),
-    Real(0.8, 1.2, "uniform", name="magnetic_field_fudge"),
+    Real(0.5, 2.0, "log-uniform", name="magnetic_moment_fudge"),
+    Real(0.8, 1.2, "log-uniform", name="magnetic_field_fudge"),
     Real(1e-14, 1e-6, "log-uniform", name="dof_damping"),
 ]
 
