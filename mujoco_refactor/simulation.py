@@ -477,6 +477,8 @@ def run_simulation(
     model.opt.timestep = SIM_TIMESTEP
     # Enable global contact parameter overrides (o_solref, o_solimp, o_friction)
     model.opt.enableflags |= mujoco.mjtEnableBit.mjENBL_OVERRIDE
+    # condim=6: enable torsional + rolling friction (default condim=3 ignores them)
+    model.geom_condim[:] = 6
 
     data = mujoco.MjData(model)
     rng = np.random.default_rng(rng_seed) if rng_seed is not None else None
