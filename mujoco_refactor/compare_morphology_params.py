@@ -19,11 +19,11 @@ FREQUENCIES = ["f10", "f30", "f50"]
 results_dir = pathlib.Path(__file__).parent / "results"
 
 
-def find_latest_solo(suffix: str) -> pathlib.Path | None:
-    """Find the latest results dir matching *_solo_{suffix}."""
+def find_latest(suffix: str) -> pathlib.Path | None:
+    """Find the latest results dir matching *_{suffix}."""
     candidates = sorted(
         d for d in results_dir.iterdir()
-        if d.is_dir() and d.name.endswith(f"solo_{suffix}")
+        if d.is_dir() and d.name.endswith(f"_{suffix}")
     )
     return candidates[-1] if candidates else None
 
@@ -114,7 +114,7 @@ def print_comparison(labels: list[str], runs: dict, params: dict, group_label: s
 morph_runs = {}
 morph_params = {}
 for morph in MORPHOLOGIES:
-    d = find_latest_solo(morph)
+    d = find_latest(f"solo_{morph}")
     if d is None:
         continue
     p = load_best_params(d)
@@ -127,7 +127,7 @@ for morph in MORPHOLOGIES:
 freq_runs = {}
 freq_params = {}
 for freq in FREQUENCIES:
-    d = find_latest_solo(freq)
+    d = find_latest(f"solo_{freq}")
     if d is None:
         continue
     p = load_best_params(d)
@@ -135,6 +135,10 @@ for freq in FREQUENCIES:
         continue
     freq_runs[freq] = d
     freq_params[freq] = p
+
+# --- Load combined result ---
+combined_run = find_latest("combined")
+combined_params = load_best_params(combined_run) if combined_run else None
 
 # --- Print ---
 print("=" * 80)
@@ -148,6 +152,44 @@ print("PER-FREQUENCY (all morphologies at one frequency)")
 print("  Divergence here → model missing frequency-dependent physics")
 print("=" * 80)
 print_comparison(FREQUENCIES, freq_runs, freq_params, "frequency")
+
+# --- Combined vs splits ---
+if combined_params and (morph_params or freq_params):
+    print("=" * 80)
+    print("COMBINED vs PER-MORPHOLOGY")
+    print("  Shows how much the global fit compromises vs per-morphology bests")
+    print("=" * 80)
+    all_labels = MORPHOLOGIES + ["COMBINED"]
+    all_runs = dict(morph_runs)
+    all_params = dict(morph_params)
+    if combined_run:
+        all_runs["COMBINED"] = combined_run
+        all_params["COMBINED"] = combined_params
+    print_comparison(all_labels, all_runs, all_params, "morph+combined")
+
+    print("=" * 80)
+    print("COMBINED vs PER-FREQUENCY")
+    print("  Shows how much the global fit compromises vs per-frequency bests")
+    print("=" * 80)
+    all_labels = FREQUENCIES + ["COMBINED"]
+    all_runs = dict(freq_runs)
+    all_params = dict(freq_params)
+    if combined_run:
+        all_runs["COMBINED"] = combined_run
+        all_params["COMBINED"] = combined_params
+    print_comparison(all_labels, all_runs, all_params, "freq+combined")
+elif combined_params:
+    print("=" * 80)
+    print("COMBINED (all morphologies + frequencies)")
+    print("=" * 80)
+    print(f"  Run: {combined_run.name}")
+    print(f"  Cost: {combined_params['_cost']:.6f}")
+    print(f"  Evals: {combined_params['_n_eval']}")
+    print()
+    for pname in PARAM_NAMES:
+        if pname in combined_params:
+            print(f"  {pname:<22}  {combined_params[pname]:>14.6g}")
+    print()
 
 print("Spread = range of positions through search space (log-space for log-uniform)")
 print("CONVERGE (<15%): shared physics — safe to lock globally")
