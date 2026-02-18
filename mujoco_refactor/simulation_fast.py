@@ -500,18 +500,20 @@ def run_simulation(
     model = mujoco.MjModel.from_xml_path(mjcf_path)
 
     # Apply parameters (all required — caller must provide a fully-populated dict)
-    ground_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, "floor")
-    model.geom_friction[ground_id] = params['ground_friction']
     model.dof_damping[-4:] = params['dof_damping']
     model.opt.o_solref = params['solref']
     model.opt.o_solimp = params['solimp']
+    # o_friction is [tangent1, tangent2, spin, rolling1, rolling2];
+    # params['ground_friction'] is [sliding, torsional, rolling].
+    gf = params['ground_friction']
+    model.opt.o_friction[:] = [gf[0], gf[0], gf[1], gf[2], gf[2]]
 
     kp_mag = params['kp_mag']
     drive_freq = params['drive_freq']
     mag_params = params['mag_params']
 
     model.opt.timestep = SIM_TIMESTEP
-    # Enable global contact parameter overrides (o_solref, o_solimp) for all contacts
+    # Enable global contact parameter overrides (o_solref, o_solimp, o_friction)
     model.opt.enableflags |= mujoco.mjtEnableBit.mjENBL_OVERRIDE
 
     data = mujoco.MjData(model)
