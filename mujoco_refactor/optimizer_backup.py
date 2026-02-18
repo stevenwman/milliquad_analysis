@@ -449,7 +449,7 @@ def _append_result_to_csv(res: dict[str, Any], elapsed_min: float) -> None:
     for scene in MJCF_PATHS:
         row[f"velocity_{scene}"] = res["scene_avg_velocities"].get(scene, 0)
         row[f"cost_{scene}"] = res["scene_costs"].get(scene, 0)
-    for rid in [row["id"] for row in _REF_ROWS]:
+    for rid in reference_ids():
         row[f"velocity_{rid}"] = res["ref_avg_velocities"].get(rid, 0)
         row[f"cost_{rid}"] = res["ref_costs"].get(rid, 0)
         row[f"lateral_{rid}"] = res.get("ref_lateral", {}).get(rid, 0)
@@ -473,7 +473,7 @@ def _append_result_to_csv(res: dict[str, Any], elapsed_min: float) -> None:
 
 def _print_point_results(results: list[dict], n_this: int) -> None:
     """Print per-point results as a compact table with one row per reference."""
-    ref_rows = _REF_ROWS  # use filtered set when --scenes is active
+    ref_rows = reference_rows()
     for i, r in enumerate(results):
         wt = r.get("wall_time", 0)
         print(f"    [{i+1}/{n_this}] id={r['id']}  cost={r['cost']:.4f}  time={wt:.1f}s")
@@ -509,7 +509,7 @@ _best_cost_so_far: float = float("inf")
 
 def _best_csv_fieldnames() -> list[str]:
     """Column names for the bests CSV (shared by header writer and append)."""
-    ref_ids = [row["id"] for row in _REF_ROWS]
+    ref_ids = [row["id"] for row in reference_rows()]
     return (
         ["timestamp", "elapsed_min", "n_eval", "id", "cost"]
         + [f"vel_{rid}" for rid in ref_ids]
@@ -525,7 +525,7 @@ def _best_csv_fieldnames() -> list[str]:
 def _append_best_csv(best: dict, n_done: int, elapsed_min: float) -> None:
     """Append a new-best row to the running bests CSV."""
     from datetime import datetime
-    ref_rows = _REF_ROWS
+    ref_rows = reference_rows()
     ref_ids = [row["id"] for row in ref_rows]
     rv = best.get("ref_avg_velocities", {})
     rl = best.get("ref_lateral", {})
@@ -559,7 +559,7 @@ def _print_best_so_far(all_results: list[dict], n_done: int, elapsed_min: float)
     """Print best result and append to bests CSV if improved."""
     global _best_cost_so_far
     best = min(all_results, key=lambda r: r["cost"])
-    ref_rows = _REF_ROWS
+    ref_rows = reference_rows()
     is_new_best = best["cost"] < _best_cost_so_far
     marker = " ★ NEW BEST" if is_new_best else ""
     print(f"  Best so far (n={n_done}): cost={best['cost']:.6f}  id={best['id']}{marker}")
@@ -807,21 +807,17 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="CMA-ES parameter optimization")
     parser.add_argument("--suffix", "-s", type=str, default="", help="Suffix appended to results folder name")
     parser.add_argument("--scenes", nargs="+", default=None, help="Only optimize for these scene keys (e.g. scene1 scene4)")
-    parser.add_argument("--freqs", nargs="+", type=float, default=None, help="Only optimize for these ctrl freqs (e.g. 10 30)")
     parser.add_argument("--n-calls", type=int, default=None, help="Override N_CALLS from config")
     args = parser.parse_args()
 
-    # Filter reference rows by scene and/or frequency
+    # Filter reference rows by scene if requested
     if args.scenes:
         _REF_ROWS = [r for r in _REF_ROWS if r["scene"] in args.scenes]
-    if args.freqs:
-        _REF_ROWS = [r for r in _REF_ROWS if r["ctrl_freq"] in args.freqs]
-    if args.scenes or args.freqs:
         _REF_INDEX_BY_ID = {row["id"]: i for i, row in enumerate(_REF_ROWS)}
         if not _REF_ROWS:
-            print(f"ERROR: no reference rows match scenes={args.scenes} freqs={args.freqs}")
+            print(f"ERROR: no reference rows match scenes {args.scenes}")
             sys.exit(1)
-        print(f"Filtered to {len(_REF_ROWS)} refs: {[r['id'] for r in _REF_ROWS]}")
+        print(f"Filtered to scenes: {args.scenes} ({len(_REF_ROWS)} refs)")
 
     # Override eval budget if requested
     if args.n_calls is not None:
@@ -906,9 +902,7 @@ if __name__ == "__main__":
 
         print(f"\n#{rank}: Cost={result_data['cost']:.6f}")
         for scene, velocity in result_data["scene_avg_velocities"].items():
-            scene_cost = result_data["scene_costs"].get(scene)
-            cost_str = f"{scene_cost:.4f}" if scene_cost is not None else "N/A"
-            print(f"  - {scene}: Avg Velocity={velocity:.4f} m/s (Cost: {cost_str})")
+            print(f"  - {scene}: Avg Velocity={velocity:.4f} m/s (Cost: {result_data['scene_costs'].get(scene, 'N/A'):.4f})")
 
         sim_params = sim_params_from_point(
             [result_data["params"][dim.name] for dim in space]
