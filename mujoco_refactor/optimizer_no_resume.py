@@ -664,30 +664,21 @@ def _create_skopt_optimizer():
     return ask, tell
 
 
-def _create_cmaes_optimizer(es_override=None):
-    """Create a CMA-ES optimizer (pycma) with log-space mapping.
-
-    If es_override is provided (a pre-existing CMAEvolutionStrategy),
-    it is used directly instead of creating a new one (for --resume-from).
-    Returns (ask, tell, es) where es is the raw pycma object.
-    """
+def _create_cmaes_optimizer():
+    """Create a CMA-ES optimizer (pycma) with log-space mapping."""
     import cma
 
-    _, lower, upper, is_log = _cmaes_space_info()
+    x0, lower, upper, is_log = _cmaes_space_info()
 
-    if es_override is not None:
-        es = es_override
-    else:
-        x0, _, _, _ = _cmaes_space_info()
-        opts = {
-            "bounds": [lower, upper],
-            "seed": OPTIMIZER_RANDOM_STATE,
-            "popsize": BATCH_SIZE,
-            "verbose": -1,  # suppress pycma's own output
-            "tolfun": 1e-8,
-            "tolx": 1e-10,
-        }
-        es = cma.CMAEvolutionStrategy(x0, CMAES_SIGMA0, opts)
+    opts = {
+        "bounds": [lower, upper],
+        "seed": OPTIMIZER_RANDOM_STATE,
+        "popsize": BATCH_SIZE,
+        "verbose": -1,  # suppress pycma's own output
+        "tolfun": 1e-8,
+        "tolx": 1e-10,
+    }
+    es = cma.CMAEvolutionStrategy(x0, CMAES_SIGMA0, opts)
 
     def ask(n_points):
         """Ask returns popsize points (n_points is ignored — CMA-ES has fixed population)."""
@@ -704,11 +695,10 @@ def _create_cmaes_optimizer(es_override=None):
             internal_points.append(internal)
         es.tell(internal_points, costs)
 
-    return ask, tell, es
+    return ask, tell
 
 
-def _run_batch_optimization(all_results: list[dict], pool: multiprocessing.Pool,
-                            es_resume=None) -> OptResult:
+def _run_batch_optimization(all_results: list[dict], pool: multiprocessing.Pool) -> OptResult:
     """
     Batch optimization loop: propose points, evaluate all references
     in parallel, tell optimizer the costs, repeat.
@@ -718,19 +708,13 @@ def _run_batch_optimization(all_results: list[dict], pool: multiprocessing.Pool,
     Args:
         all_results: Mutable list to accumulate results (replaces global).
         pool: Pre-created multiprocessing pool.
-        es_resume: Optional pre-loaded CMA-ES state to resume from.
     """
-    es = None  # only set for CMA-ES backend
     if OPTIMIZER_BACKEND == "cmaes":
-        ask, tell, es = _create_cmaes_optimizer(es_override=es_resume)
-        if es_resume is not None:
-            print(f"  Backend: CMA-ES RESUMED (sigma={es.sigma:.4g}, popsize={BATCH_SIZE})")
-        else:
-            warm = "warm-start" if CMAES_X0 is not None else "cold-start"
-            print(f"  Backend: CMA-ES (sigma0={CMAES_SIGMA0}, popsize={BATCH_SIZE}, {warm})")
+        ask, tell = _create_cmaes_optimizer()
+        warm = "warm-start" if CMAES_X0 is not None else "cold-start"
+        print(f"  Backend: CMA-ES (sigma0={CMAES_SIGMA0}, popsize={BATCH_SIZE}, {warm})")
     else:
         ask, tell = _create_skopt_optimizer()
-        es = None
         print(f"  Backend: skopt ({BASE_ESTIMATOR}, acq={ACQ_FUNC})")
 
     n_done = 0
@@ -805,16 +789,6 @@ def _run_batch_optimization(all_results: list[dict], pool: multiprocessing.Pool,
 
         _print_best_so_far(all_results, n_done, elapsed_min)
 
-        # Save CMA-ES state every batch for resumption.
-        # State (sigma, covariance, paths) evolves every generation,
-        # not just at new bests — so save after every batch.
-        if es is not None:
-            import pickle
-            state_path = pathlib.Path(BEST_CSV_PATH).parent / "cmaes_state.pkl"
-            space_bounds = [(d.name, d.low, d.high, d.prior) for d in space]
-            with open(state_path, "wb") as f:
-                pickle.dump({"es": es, "n_done": n_done, "space_bounds": space_bounds}, f)
-
     best = min(all_results, key=lambda r: r["cost"])
     return OptResult(
         fun=best["cost"],
@@ -835,58 +809,7 @@ if __name__ == "__main__":
     parser.add_argument("--scenes", nargs="+", default=None, help="Only optimize for these scene keys (e.g. scene1 scene4)")
     parser.add_argument("--freqs", nargs="+", type=float, default=None, help="Only optimize for these ctrl freqs (e.g. 10 30)")
     parser.add_argument("--n-calls", type=int, default=None, help="Override N_CALLS from config")
-    parser.add_argument("--warm-start-from", type=str, default=None,
-                        help="Results dir (or path to optimization_bests.csv) to warm-start from. "
-                             "Reads best params from last row of optimization_bests.csv.")
-    parser.add_argument("--resume-from", type=str, default=None,
-                        help="Results dir containing cmaes_state.pkl to resume from. "
-                             "Restores full CMA-ES state (sigma, covariance, paths).")
     args = parser.parse_args()
-
-    # Resume: load full CMA-ES state (mutually exclusive with warm-start)
-    es_resume = None
-    if args.resume_from and args.warm_start_from:
-        print("ERROR: --resume-from and --warm-start-from are mutually exclusive")
-        sys.exit(1)
-    if args.resume_from:
-        import pickle
-        resume_path = pathlib.Path(args.resume_from)
-        if resume_path.is_dir():
-            resume_path = resume_path / "cmaes_state.pkl"
-        if not resume_path.exists():
-            print(f"ERROR: resume state not found: {resume_path}")
-            sys.exit(1)
-        with open(resume_path, "rb") as f:
-            state = pickle.load(f)
-        es_resume = state["es"]
-        prev_n_done = state["n_done"]
-        # Validate space bounds match the pickled state
-        saved_bounds = state.get("space_bounds")
-        if saved_bounds is not None:
-            current_bounds = [(d.name, d.low, d.high, d.prior) for d in space]
-            if saved_bounds != current_bounds:
-                resume_dir = resume_path.parent if resume_path.name == "cmaes_state.pkl" else resume_path
-                print("ERROR: current config.py space does not match the resumed run.")
-                print(f"  Copy the saved config: cp {resume_dir}/config.py mujoco_refactor/config.py")
-                sys.exit(1)
-        print(f"Resuming from {resume_path} (sigma={es_resume.sigma:.4g}, prev evals={prev_n_done})")
-
-    # Warm-start: load best params from a previous run
-    if args.warm_start_from:
-        ws_path = pathlib.Path(args.warm_start_from)
-        if ws_path.is_dir():
-            ws_path = ws_path / "optimization_bests.csv"
-        if not ws_path.exists():
-            print(f"ERROR: warm-start file not found: {ws_path}")
-            sys.exit(1)
-        with open(ws_path) as f:
-            ws_rows = list(csv.DictReader(f))
-        if not ws_rows:
-            print(f"ERROR: warm-start file is empty: {ws_path}")
-            sys.exit(1)
-        ws_last = ws_rows[-1]
-        CMAES_X0 = {dim.name: float(ws_last[dim.name]) for dim in space}
-        print(f"Warm-starting from {ws_path} (cost={ws_last['cost']})")
 
     # Filter reference rows by scene and/or frequency
     if args.scenes:
@@ -949,7 +872,7 @@ if __name__ == "__main__":
         pool_size = max(1, min(os.cpu_count() or 16, tasks_per_batch))
         print(f"Worker pool size: {pool_size} (tasks per batch: {tasks_per_batch})")
         pool = multiprocessing.Pool(processes=pool_size)
-        result = _run_batch_optimization(all_results, pool, es_resume=es_resume)
+        result = _run_batch_optimization(all_results, pool)
     finally:
         if pool:
             print("\n--- Finalizing: Terminating worker pool. ---")
