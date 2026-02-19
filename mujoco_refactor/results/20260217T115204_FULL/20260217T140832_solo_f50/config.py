@@ -239,7 +239,7 @@ YAW_COST_WEIGHT = 1.0  # yaw spin-out penalty enabled
 space: list[Real] = [
     Real(1e-6, 10.0, "log-uniform", name="sliding_friction"),
     Real(1e-6, 10.0, "log-uniform", name="torsional_friction"),
-    Real(1e-6, 1e-3, "log-uniform", name="rolling_friction"),  # condim=6: >1e-3 kills locomotion
+    Real(1e-6, 10.0, "log-uniform", name="rolling_friction"),
     Real(1e-5, 1.0, "log-uniform", name="solref_timeconst"),
     Real(0.01, 10.0, "log-uniform", name="solref_dampratio"),
     Real(0.001, 0.999, "uniform", name="solimp_dmin"),
@@ -247,8 +247,8 @@ space: list[Real] = [
     Real(1e-7, 1, "log-uniform", name="solimp_width"),
     Real(0.01, 0.99, "uniform", name="solimp_midpoint"),
     Real(1.0, 10.0, "uniform", name="solimp_power"),
-    Real(0.8, 1.2, "uniform", name="magnetic_moment_fudge"),
-    Real(0.8, 1.2, "uniform", name="magnetic_field_fudge"),
+    Real(0.5, 2.0, "log-uniform", name="magnetic_moment_fudge"),
+    Real(0.8, 1.2, "log-uniform", name="magnetic_field_fudge"),
     Real(1e-14, 1e-6, "log-uniform", name="dof_damping"),
 ]
 
