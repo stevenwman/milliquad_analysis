@@ -1,180 +1,162 @@
-# Optimization Journey: How We Got to cost=0.014
+# Run Lineage for `20260219T075624`
 
-## Timeline Summary
+How we arrived at the current best parameters, focused on reproducibility.
 
-| Date | Run | Best Cost | Key Change |
-|------|-----|-----------|------------|
-| Feb 15 | Various combined | 0.94 → 0.61 | Iterating cost function: added lateral, yaw, tried CMA-ES sigma |
-| Feb 16 | `wider_param_C_BEST-SO-FAR` | 0.128 | dmax reparameterization + wider bounds |
-| Feb 17 | `20260217T115204_FULL` | per-scene 0.001–0.008 | First per-morphology/frequency sweep |
-| Feb 17 | `20260217T172330_FULL` | per-scene 0.0000–0.003 | Second sweep (better) |
-| Feb 18 | `20260218T100611_FULL_CORRECT_FRICTION` | per-scene 0.0001–0.026 | **Third sweep after fixing condim=6 friction** |
-| Feb 18 | ↳ scene2 & f30 sub-runs | 12.77, 13.33 | **Failed** — cold-start stagnation |
-| Feb 18 | ↳ rerun scene2 & f30 (warm-started) | 0.0001, 0.0006 | Fixed with warm-start from known-good params |
-| Feb 18 | ↳ combined sub-run | 0.734 | Bad local minimum (sliding_friction=3.66) |
-| Feb 18 | Convergence analysis | — | Identified converged vs divergent params across sweeps |
-| Feb 18 | `20260218T223844` | **0.014** | Tightened bounds + warm-start X0 from sweep consensus |
-| Feb 19 | `20260219T064143_couldnt_recreate` | 0.130 | Warm-start from T223844 best, sigma=0.5 too wide |
-| Feb 19 | `20260219T075624` | 0.012 (ongoing) | Resumed from T223844 CMA-ES state (sigma=0.02) |
+## Run Chain
 
----
+```
+20260218T100611_FULL_CORRECT_FRICTION/   (per-morphology/frequency sweep)
+  ├── 10 sub-runs (scene1,2,4,wheel × solo; f10,30,50 × solo; combined)
+  ├── scene2 & f30 failed cold-start → reran warm-started
+  └── convergence analysis (compare_morphology_params.py)
+        ↓ tightened bounds + consensus X0
+20260218T223844                          (combined, warm-started, cost=0.014)
+        ↓ replay_cmaes_state.py → cmaes_state.pkl
+20260219T075624                          (resumed via --resume-from)
+```
 
-## Phase 1: Building the Cost Function (Feb 14–16)
+## Step 1: Per-Morphology/Frequency Sweep
 
-Starting from a basic velocity-matching objective, we iteratively added penalty
-terms to handle failure modes:
+**Run:** `results/20260218T100611_FULL_CORRECT_FRICTION/`
 
-- **Lateral penalty** (Feb 15): robots drifting sideways were getting good
-  forward velocity scores. Added squared lateral displacement penalty.
-- **Yaw penalty** (Feb 15): single-leg robots spinning out at high frequencies.
-  Added heading deviation penalty beyond 60 deg.
-- **Tumble penalty**: robots flipping over. Per-frame penalty when uprightness
-  drops below horizontal.
-- **Velocity variance** (Feb 16): uneven fit across references. Added penalty on
-  variance of relative velocity errors.
-- **Dead-zone** (Feb 16): using experimental speed_std as dead-zone so velocity
-  error inside 1-sigma of measurement uncertainty costs zero.
+**Prereq:** condim=6 friction fix (commits `a331032`, `0f7ab37`) — torsional and
+rolling friction were previously no-ops in the simulation.
 
-CMA-ES replaced skopt (Bayesian/GP) around Feb 15 — GP was struggling in 13D
-(boundary-seeking, few improvements). CMA-ES immediately performed better.
+**What:** Ran `run_per_morphology.sh`, which launches 7 solo CMA-ES optimizations
+(one per scene, one per frequency) plus a combined run. Each solo run optimizes
+the same 13D space but only evaluates a subset of the 11 references.
 
-Key sigma0 insight: sigma=0.15 stagnated at cost 0.692; sigma=0.5 broke through
-to 0.612. Wide initial exploration is critical.
+**Config:** sigma0=0.5, seed=69420, BATCH_SIZE=8, cold-start (X0=None, midpoint).
 
-Best combined cost by end of Phase 1: **0.128** (run `wider_param_C_BEST-SO-FAR`,
-after dmax reparameterization and wider bounds).
+**Sub-run results:**
 
-## Phase 2: Per-Morphology/Frequency Sweeps (Feb 17–18)
+| Sub-run | Evals | Best Cost | Status |
+|---------|-------|-----------|--------|
+| solo_scene1 | 1160 | 0.0258 | OK |
+| solo_scene2 | 144 | 12.77 | **Failed** (cold-start stagnation) |
+| solo_scene4 | 1152 | 0.0003 | OK |
+| solo_scene_wheel | 912 | 0.0001 | OK |
+| solo_f10 | 680 | 0.0003 | OK |
+| solo_f30 | 216 | 13.33 | **Failed** (cold-start stagnation) |
+| solo_f50 | 1168 | 0.0284 | OK |
+| combined | 840 | 0.734 | Bad local min |
 
-Instead of optimizing all 11 references at once, we ran per-scene and
-per-frequency sweeps to understand which params are shared vs morphology-specific.
+**Reruns of failed sub-runs** (warm-started from a prior sweep's best):
+- `20260218T213230_solo_scene2` → cost 0.0001 at 784 evals
+- `20260218T215525_solo_f30` → cost 0.0006 at 720 evals
 
-### Sweep structure
+## Step 2: Convergence Analysis
 
-Each sweep ran 7 solo optimizations (scene1, scene2, scene4, scene_wheel, f10,
-f30, f50) plus one combined run. Three full sweeps were run:
+**Script:** `compare_morphology_params.py` on the 10 solo results (8 original + 2
+reruns).
 
-1. `20260217T115204_FULL` — first sweep
-2. `20260217T172330_FULL` — second sweep
-3. `20260218T100611_FULL_CORRECT_FRICTION` — **after fixing condim=6 friction**
+**Finding:** Some params converge to similar values across all morphologies/freqs
+(true physics), others diverge (compensating for model mismatch).
 
-The condim=6 fix (commit `a331032`, `0f7ab37`) was a critical bug: torsional and
-rolling friction were previously having no effect on the simulation. Once fixed,
-friction parameters became meaningful and the sweep results changed substantially.
+Converged → narrowed bounds. Divergent → left as-is.
 
-### Failures in the third sweep
+The sweep ran with "maximally permissive" bounds (saved in
+`results/20260218T100611_FULL_CORRECT_FRICTION/*/config.py`). Only params that
+converged across sweeps got tightened for the combined run:
 
-Two sub-runs failed with costs >12:
-- **scene2** (cost=12.77 at 144 evals): cold-start, CMA-ES sigma collapsed
-  before finding locomotion
-- **f30** (cost=13.33 at 216 evals): same failure mode
+| Parameter | Sweep bounds | Converged? | New bounds | What changed |
+|-----------|-------------|-----------|------------|--------------|
+| sliding_friction | [1e-6, 10.0] | Yes (12%) | [0.01, 2.0] | lower raised 4 OOM, upper from 10→2 |
+| magnetic_moment_fudge | [0.8, 1.2] | Yes (8%) | [0.75, 0.90] | narrowed around ~0.80 pin |
+| dof_damping | [1e-14, 1e-6] | Yes (9%) | [1e-10, 1e-8] | 8 OOM range → 2 OOM |
+| solref_dampratio | [0.01, 10.0] | Freq-only (2.4%) | [1.0, 10.0] | lower from 0.01→1.0 |
+| solimp_power | [1.0, 10.0] | Freq-only (14%) | [2.0, 7.0] | both ends narrowed |
+| solimp_dmin | [0.001, 0.999] | No | [0.001, 0.999] | unchanged |
+| solimp_delta_d | [0.01, 0.99] | No | [0.01, 0.99] | unchanged |
+| solimp_width | [1e-7, 1] | No | [1e-7, 1] | unchanged |
+| solimp_midpoint | [0.01, 0.99] | No | [0.01, 0.99] | unchanged |
+| solref_timeconst | [1e-5, 1.0] | No | [1e-5, 1.0] | unchanged |
+| torsional_friction | [1e-6, 10.0] | No | [1e-6, 10.0] | unchanged |
+| rolling_friction | [1e-6, 1e-3] | No | [1e-6, 1e-3] | unchanged |
+| magnetic_field_fudge | [0.8, 1.2] | No | [0.8, 1.2] | unchanged |
 
-Root cause: the log-midpoint of sliding_friction was below 0.05, which produces
-no locomotion. CMA-ES starting from there with sigma=0.5 couldn't escape fast
-enough.
-
-Fix: re-ran both with `--warm-start-from` a known-good run, which placed the
-initial mean in a locomotion-producing region. Results: scene2=0.0001, f30=0.0006.
-
-### Convergence analysis
-
-Using `compare_morphology_params.py`, we analyzed which params converged across
-sweeps:
-
-**Converged** (similar across morphologies/frequencies — these are true physical
-parameters):
-- `sliding_friction`: 0.05–0.36 (12% relative spread)
-- `magnetic_moment_fudge`: pins at ~0.80 across all runs (8%)
-- `dof_damping`: 5e-10 to 3e-9 (9%)
-
-**Converged by frequency only** (not morphology):
-- `solref_dampratio`: 5.8–6.9 (2.4%)
-- `solimp_power`: 4.3–5.9 (14%)
-
-**Divergent** (different across morphologies — likely compensating for model
-mismatch):
-- `solimp_dmin`, `solimp_width`, `solimp_midpoint`, `solref_timeconst`
-
-## Phase 3: Informed Combined Optimization (Feb 18)
-
-Armed with convergence analysis, we made two key changes to config.py:
-
-### 1. Tightened search space bounds
-
-Narrowed bounds on converged params to focus CMA-ES search:
-- `sliding_friction`: [0.01, 2.0] (was [1e-5, 0.8])
-- `magnetic_moment_fudge`: [0.75, 0.90] (was [0.5, 1.5])
-- `dof_damping`: [1e-10, 1e-8] (was [7e-12, 7e-9])
-- `solref_dampratio`: [1.0, 10.0] (was [0.1, 2.0])
-- `solimp_power`: [2.0, 7.0] (was [1.0, 6.0])
-
-Divergent params kept wide to give the optimizer freedom.
-
-### 2. Warm-start X0 from sweep consensus
-
-Instead of cold-starting from the space midpoint, we set CMAES_X0 to the
-geometric mean of per-morphology sweep bests (for converged params) and scene4
-values (for divergent params):
+**Warm-start X0:** `compare_morphology_params.py` calls `find_latest("solo_*")`
+to load the best params from each of the 7 (or 9, with reruns) solo sub-runs.
+The X0 was set manually by eyeballing the comparison table output:
+- Converged params: geometric mean across all solo bests
+- Divergent params: scene4 values (middle-of-the-road morphology)
 
 ```python
 CMAES_X0 = {
-    "sliding_friction": 0.17,
-    "torsional_friction": 0.00011,
-    "rolling_friction": 5e-6,
-    "solref_timeconst": 0.003,
-    "solref_dampratio": 6.0,
-    "solimp_dmin": 0.30,
-    "solimp_delta_d": 0.35,
-    "solimp_width": 6.6e-5,
-    "solimp_midpoint": 0.41,
-    "solimp_power": 5.3,
-    "magnetic_moment_fudge": 0.81,
-    "magnetic_field_fudge": 0.93,
+    "sliding_friction": 0.17,     "torsional_friction": 0.00011,
+    "rolling_friction": 5e-6,     "solref_timeconst": 0.003,
+    "solref_dampratio": 6.0,      "solimp_dmin": 0.30,
+    "solimp_delta_d": 0.35,       "solimp_width": 6.6e-5,
+    "solimp_midpoint": 0.41,      "solimp_power": 5.3,
+    "magnetic_moment_fudge": 0.81, "magnetic_field_fudge": 0.93,
     "dof_damping": 8e-10,
 }
 ```
 
-### Result: `20260218T223844`
+## Step 3: Combined Optimization
 
-Cost trajectory: 1.08 → 0.54 → 0.22 → 0.075 → **0.014** over 2272 evals
-(~2.5 hours).
+**Run:** `results/20260218T223844/`
 
-Average |delta%| velocity across all 11 references: **4.8%**. Most references
-within 5% of experimental measurement. Zero tumble, low lateral drift, no yaw
-blowups.
+**Command:** `uv run python optimizer.py` (no CLI flags — config.py had the
+tightened bounds and X0 baked in)
 
-## Phase 4: Continuing the Run (Feb 19)
+**Config:** sigma0=0.5, seed=69420, BATCH_SIZE=8, N_CALLS=2400, warm-start from
+consensus X0 above, tightened bounds from step 2. All 11 references active.
 
-### Failed attempt: warm-start continuation
+**Result:** cost 1.08 → 0.014 over 2272 evals (~2.5 hours). Final sigma=0.01975.
 
-Tried warm-starting a new run from T223844's best params (`--warm-start-from`).
-This only transfers the mean vector (X0) — CMA-ES resets sigma to 0.5 and
-covariance to identity. The old run had refined sigma down to ~0.02, so sigma=0.5
-scattered the first generation far from the optimum. Result: cost=0.130, worse
-than where we started.
+## Step 4: Resume
 
-### Solution: full state resume
+**Problem:** The run completed its 2400-eval budget. We wanted to continue but
+warm-starting from the best params resets sigma to 0.5 (way too wide for a
+refined solution). Confirmed by the failed run `20260219T064143_couldnt_recreate`
+which only reached cost=0.130.
 
-Built `replay_cmaes_state.py` to reconstruct the CMA-ES internal state (sigma,
-covariance matrix, evolution paths) from the CSV history by replaying the
-ask/tell sequence. Added `--resume-from` to optimizer.py to load the pickled
-state. The resumed run (`20260219T075624`) continues from exactly where T223844
-left off.
+**Fix:** Reconstructed full CMA-ES state from CSV history:
 
-## Best Parameters (as of `20260218T223844`, cost=0.014)
+```bash
+cd mujoco_refactor
+uv run python replay_cmaes_state.py results/20260218T223844
+```
 
-| Parameter | Value | Note |
-|-----------|-------|------|
-| sliding_friction | 0.504 | |
-| torsional_friction | 5.9e-4 | |
-| rolling_friction | 2.7e-6 | |
-| solref_timeconst | 0.0025 | |
-| solref_dampratio | 2.82 | |
-| solimp_dmin | 0.495 | |
-| solimp_delta_d | 0.700 | → dmax = 0.848 |
-| solimp_width | 2.7e-5 | |
-| solimp_midpoint | 0.673 | |
-| solimp_power | 5.51 | |
-| magnetic_moment_fudge | 0.752 | near lower bound |
-| magnetic_field_fudge | 0.976 | |
-| dof_damping | 5.9e-10 | |
+This replays every ask/tell batch through a fresh CMA-ES (same seed/config),
+producing `cmaes_state.pkl` with sigma=0.01975, learned covariance, and evolution
+paths.
+
+**Run:** `results/20260219T075624/`
+
+```bash
+uv run python optimizer.py --resume-from results/20260218T223844 --n-calls 2400
+```
+
+**Config:** Identical config.py to T223844 (validated by bounds check in pickle).
+CMA-ES continues from exactly where T223844 left off.
+
+## Reproducing from Scratch
+
+The config.py snapshot in `results/20260218T223844/config.py` is the exact config
+used. To reproduce the full chain:
+
+```bash
+cd mujoco_refactor
+
+# 1. Ensure you're on the right code (condim=6 friction fix)
+git checkout e4bb5f9  # or later
+
+# 2. Run per-morphology sweep (uses config.py as-is with sigma0=0.5, X0=consensus)
+#    Note: the sweep script ran with an EARLIER config (cold-start, wider bounds).
+#    The sweep results informed the config changes in step 2 above.
+bash run_per_morphology.sh
+
+# 3. Analyze convergence
+uv run python compare_morphology_params.py
+
+# 4. Apply tightened bounds + X0 to config.py (see Step 2 above)
+
+# 5. Run combined
+uv run python optimizer.py --n-calls 2400
+
+# 6. Resume if needed
+uv run python replay_cmaes_state.py results/<timestamp>
+uv run python optimizer.py --resume-from results/<timestamp> --n-calls 2400
+```
