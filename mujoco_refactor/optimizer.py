@@ -664,21 +664,30 @@ def _create_skopt_optimizer():
     return ask, tell
 
 
-def _create_cmaes_optimizer():
-    """Create a CMA-ES optimizer (pycma) with log-space mapping."""
+def _create_cmaes_optimizer(es_override=None):
+    """Create a CMA-ES optimizer (pycma) with log-space mapping.
+
+    If es_override is provided (a pre-existing CMAEvolutionStrategy),
+    it is used directly instead of creating a new one (for --resume-from).
+    Returns (ask, tell, es) where es is the raw pycma object.
+    """
     import cma
 
-    x0, lower, upper, is_log = _cmaes_space_info()
+    _, lower, upper, is_log = _cmaes_space_info()
 
-    opts = {
-        "bounds": [lower, upper],
-        "seed": OPTIMIZER_RANDOM_STATE,
-        "popsize": BATCH_SIZE,
-        "verbose": -1,  # suppress pycma's own output
-        "tolfun": 1e-8,
-        "tolx": 1e-10,
-    }
-    es = cma.CMAEvolutionStrategy(x0, CMAES_SIGMA0, opts)
+    if es_override is not None:
+        es = es_override
+    else:
+        x0, _, _, _ = _cmaes_space_info()
+        opts = {
+            "bounds": [lower, upper],
+            "seed": OPTIMIZER_RANDOM_STATE,
+            "popsize": BATCH_SIZE,
+            "verbose": -1,  # suppress pycma's own output
+            "tolfun": 1e-8,
+            "tolx": 1e-10,
+        }
+        es = cma.CMAEvolutionStrategy(x0, CMAES_SIGMA0, opts)
 
     def ask(n_points):
         """Ask returns popsize points (n_points is ignored — CMA-ES has fixed population)."""
@@ -695,7 +704,7 @@ def _create_cmaes_optimizer():
             internal_points.append(internal)
         es.tell(internal_points, costs)
 
-    return ask, tell
+    return ask, tell, es
 
 
 def _run_batch_optimization(all_results: list[dict], pool: multiprocessing.Pool) -> OptResult:
@@ -809,7 +818,27 @@ if __name__ == "__main__":
     parser.add_argument("--scenes", nargs="+", default=None, help="Only optimize for these scene keys (e.g. scene1 scene4)")
     parser.add_argument("--freqs", nargs="+", type=float, default=None, help="Only optimize for these ctrl freqs (e.g. 10 30)")
     parser.add_argument("--n-calls", type=int, default=None, help="Override N_CALLS from config")
+    parser.add_argument("--warm-start-from", type=str, default=None,
+                        help="Results dir (or path to optimization_bests.csv) to warm-start from. "
+                             "Reads best params from last row of optimization_bests.csv.")
     args = parser.parse_args()
+
+    # Warm-start: load best params from a previous run
+    if args.warm_start_from:
+        ws_path = pathlib.Path(args.warm_start_from)
+        if ws_path.is_dir():
+            ws_path = ws_path / "optimization_bests.csv"
+        if not ws_path.exists():
+            print(f"ERROR: warm-start file not found: {ws_path}")
+            sys.exit(1)
+        with open(ws_path) as f:
+            ws_rows = list(csv.DictReader(f))
+        if not ws_rows:
+            print(f"ERROR: warm-start file is empty: {ws_path}")
+            sys.exit(1)
+        ws_last = ws_rows[-1]
+        CMAES_X0 = {dim.name: float(ws_last[dim.name]) for dim in space}
+        print(f"Warm-starting from {ws_path} (cost={ws_last['cost']})")
 
     # Filter reference rows by scene and/or frequency
     if args.scenes:
