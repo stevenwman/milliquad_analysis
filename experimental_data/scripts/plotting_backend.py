@@ -52,8 +52,8 @@ class MatplotlibBackend:
         self.save = save
         self.colors = plt.get_cmap("tab10").colors
 
-    def _finish(self, fig: plt.Figure, file_stem: str) -> None:
-        fig.tight_layout()
+    def _finish(self, fig: plt.Figure, file_stem: str, right_margin: float = 1.0) -> None:
+        fig.tight_layout(rect=(0.0, 0.0, right_margin, 1.0))
         if self.save:
             self.out_dir.mkdir(parents=True, exist_ok=True)
             fig.savefig(self.out_dir / f"{file_stem}.png", dpi=160)
@@ -63,12 +63,11 @@ class MatplotlibBackend:
             plt.close(fig)
 
     def plot_flat(self, p: FlatPlotInputs, file_stem: str) -> None:
-        fig, axs = plt.subplots(4, 1, figsize=(8, 12))
+        fig, axs = plt.subplots(4, 1, figsize=(11, 12))
         labels = [f"Trial {i+1}" for i in range(len(p.trials))]
 
         for i, arr in enumerate(p.trials):
             axs[0].plot(p.t, arr, color=self.colors[i % 10], linewidth=1.2, label=labels[i])
-        axs[0].plot(p.t, p.speed_mean, color="black", linewidth=1.5, label="Mean")
         lo = p.speed_steady_mean - p.speed_steady_std
         hi = p.speed_steady_mean + p.speed_steady_std
         axs[0].axhspan(lo, hi, color="tab:orange", alpha=0.30)
@@ -87,34 +86,38 @@ class MatplotlibBackend:
                 linewidth=1.2,
                 label=f"Reach mean @ {p.t_reach_avg * 1000.0:.2f} ms",
             )
-        axs[0].set_ylim(-50, 600)
+        all_v = np.concatenate([arr[np.isfinite(arr)] for arr in p.trials])
+        if all_v.size > 0:
+            v_min = float(np.min(all_v))
+            v_max = float(np.max(all_v))
+            pad = max(20.0, 0.15 * (v_max - v_min))
+            axs[0].set_ylim(v_min - pad, v_max + pad)
         axs[0].set_ylabel("v_x [mm/s]")
         axs[0].set_title(f"Forward Speed vs. Time - {p.title_prefix}")
-        axs[0].legend(loc="best", fontsize=8)
+        axs[0].legend(
+            loc="upper left",
+            bbox_to_anchor=(1.02, 1.0),
+            borderaxespad=0.0,
+            fontsize=8,
+        )
         axs[0].grid(True)
 
-        self._plot_steady_band(
+        self._plot_trials_only_panel(
             ax=axs[1],
             t=p.t,
             trials=p.y,
-            mean_curve=p.y_mean,
-            mean=p.y_steady_mean,
-            std=p.y_steady_std,
             ylabel="height [mm]",
             title=f"Body Height vs. Time - {p.title_prefix}",
-            margin=0.5,
+            margin=1.0,
         )
 
-        self._plot_steady_band(
+        self._plot_trials_only_panel(
             ax=axs[2],
             t=p.t,
             trials=p.theta,
-            mean_curve=p.theta_mean,
-            mean=p.theta_steady_mean,
-            std=p.theta_steady_std,
             ylabel="theta",
             title=f"Body Angle vs. Time - {p.title_prefix}",
-            margin=5.0,
+            margin=8.0,
         )
 
         self._plot_steady_band(
@@ -126,11 +129,32 @@ class MatplotlibBackend:
             std=p.omega_steady_std,
             ylabel="omega",
             title=f"Angular Velocity vs. Time - {p.title_prefix}",
-            margin=20000.0,
+            margin=30000.0,
         )
         axs[3].set_xlabel("Time [s]")
 
-        self._finish(fig, file_stem)
+        self._finish(fig, file_stem, right_margin=0.82)
+
+    def _plot_trials_only_panel(
+        self,
+        ax: plt.Axes,
+        t: np.ndarray,
+        trials: Sequence[np.ndarray],
+        ylabel: str,
+        title: str,
+        margin: float,
+    ) -> None:
+        for i, arr in enumerate(trials):
+            ax.plot(t, arr, color=self.colors[i % 10], linewidth=1.2)
+        finite_blocks = [arr[np.isfinite(arr)] for arr in trials if np.any(np.isfinite(arr))]
+        if finite_blocks:
+            lo = float(np.min(np.concatenate(finite_blocks)))
+            hi = float(np.max(np.concatenate(finite_blocks)))
+            pad = max(margin, 0.08 * (hi - lo))
+            ax.set_ylim(lo - pad, hi + pad)
+        ax.set_ylabel(ylabel)
+        ax.set_title(title)
+        ax.grid(True)
 
     def _plot_steady_band(
         self,
@@ -146,25 +170,32 @@ class MatplotlibBackend:
     ) -> None:
         for i, arr in enumerate(trials):
             ax.plot(t, arr, color=self.colors[i % 10], linewidth=1.2)
-        ax.plot(t, mean_curve, color="black", linewidth=1.5)
         lo = mean - std
         hi = mean + std
         ax.axhspan(lo, hi, color="tab:orange", alpha=0.30)
         ax.axhline(mean, linestyle=":", linewidth=1.0, color="black")
         ax.axhline(hi, linestyle=":", linewidth=1.0, color="black")
         ax.axhline(lo, linestyle=":", linewidth=1.0, color="black")
-        ax.set_ylim(lo - margin, hi + margin)
+        finite_blocks = [arr[np.isfinite(arr)] for arr in trials if np.any(np.isfinite(arr))]
+        if finite_blocks:
+            trial_min = float(np.min(np.concatenate(finite_blocks)))
+            trial_max = float(np.max(np.concatenate(finite_blocks)))
+            lo_ref = min(lo, trial_min)
+            hi_ref = max(hi, trial_max)
+            pad = max(margin, 0.08 * (hi_ref - lo_ref))
+            ax.set_ylim(lo_ref - pad, hi_ref + pad)
+        else:
+            ax.set_ylim(lo - margin, hi + margin)
         ax.set_ylabel(ylabel)
         ax.set_title(title)
         ax.grid(True)
 
     def plot_steps(self, p: StepsPlotInputs, file_stem: str) -> None:
-        fig, axs = plt.subplots(4, 1, figsize=(8, 12))
+        fig, axs = plt.subplots(4, 1, figsize=(11, 12))
         n_trials = p.speed_mat.shape[1]
-        labels = [f"Trial {i+1}" for i in range(n_trials)] + ["Mean"]
+        labels = [f"Trial {i+1}" for i in range(n_trials)]
 
         mats = [p.speed_mat, p.y_mat, p.theta_mat, p.omega_mat]
-        means = [p.speed_mean, p.y_mean, p.theta_mean, p.omega_mean]
         ylabels = ["v [mm/s]", "height [mm]", "theta", "rot"]
         titles = [
             f"Forward Speed vs. Time - {p.title_prefix}",
@@ -177,13 +208,17 @@ class MatplotlibBackend:
             mat = mats[idx]
             for i in range(n_trials):
                 ax.plot(p.t, mat[:, i], color=self.colors[i % 10], linewidth=1.0)
-            ax.plot(p.t, means[idx], color="black", linewidth=2.0)
             ax.set_ylabel(ylabels[idx])
             ax.set_title(titles[idx])
             ax.grid(True)
             if idx == 0:
-                handles = ax.lines[: n_trials + 1]
+                handles = ax.lines[:n_trials]
                 ax.legend(handles, labels, loc="best", fontsize=8)
-        axs[2].set_ylim(-30, 15)
+        theta_finite = p.theta_mat[np.isfinite(p.theta_mat)]
+        if theta_finite.size > 0:
+            th_min = float(np.min(theta_finite))
+            th_max = float(np.max(theta_finite))
+            th_pad = max(3.0, 0.10 * (th_max - th_min))
+            axs[2].set_ylim(th_min - th_pad, th_max + th_pad)
         axs[3].set_xlabel("Time [s]")
         self._finish(fig, file_stem)
