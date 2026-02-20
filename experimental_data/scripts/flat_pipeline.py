@@ -7,6 +7,7 @@ import numpy as np
 
 from pipeline_common import MM_SCALE, base_dir, load_trial_csv
 from plotting_backend import FlatPlotInputs, MatplotlibBackend
+from plotly_backend import PlotlyBackend
 
 
 @dataclass(frozen=True)
@@ -120,10 +121,15 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Flat-ground pipeline port of Flat.m/plotFlat.m")
     parser.add_argument("--show", action="store_true", help="Display figures interactively")
     parser.add_argument("--no-save", action="store_true", help="Do not save PNG outputs")
+    parser.add_argument("--backend", choices=["matplotlib", "plotly"], default="matplotlib")
     args = parser.parse_args()
 
-    out_dir = base_dir() / "plots" / "flat"
-    backend = MatplotlibBackend(out_dir=out_dir, show=args.show, save=not args.no_save)
+    if args.backend == "plotly":
+        out_dir = base_dir() / "plots" / "flat_html"
+        backend = PlotlyBackend(out_dir=out_dir, show=args.show, save=not args.no_save)
+    else:
+        out_dir = base_dir() / "plots" / "flat"
+        backend = MatplotlibBackend(out_dir=out_dir, show=args.show, save=not args.no_save)
     for cond in build_conditions():
         run_condition(cond, backend)
     print(f"Flat pipeline complete. Output dir: {out_dir}")
