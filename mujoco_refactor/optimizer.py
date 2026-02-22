@@ -56,6 +56,7 @@ from config import (
     TUMBLE_PENALTY_SCALE,
     TUMBLE_THRESHOLD,
     VELOCITY_COST_WEIGHT,
+    VELOCITY_DEADZONE,
     VELOCITY_VARIANCE_WEIGHT,
     LATERAL_COST_WEIGHT,
     YAW_THRESHOLD_DEG,
@@ -129,12 +130,11 @@ def calculate_cost(
         forward_displacement = final_state["pos"][0] - start_state["pos"][0]
         avg_forward_velocity = forward_displacement / active_duration
 
-    # Dead-zone velocity error: no penalty within 1-sigma of target
+    # Velocity error (relative squared)
     vel_deviation = avg_forward_velocity - target_velocity
-    if speed_std > 0.0 and abs(vel_deviation) <= speed_std:
+    if VELOCITY_DEADZONE and speed_std > 0.0 and abs(vel_deviation) <= speed_std:
         velocity_error = 0.0
-    elif speed_std > 0.0:
-        # Penalize only the excess beyond the dead zone
+    elif VELOCITY_DEADZONE and speed_std > 0.0:
         excess = abs(vel_deviation) - speed_std
         velocity_error = (excess / target_velocity) ** 2
     else:

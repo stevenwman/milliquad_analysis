@@ -160,7 +160,6 @@ PITCH_RMS_TARGET_DEG = 0.0  # target RMS pitch (deg); set when you have referenc
 PITCH_RMS_WEIGHT = 0.0  # set >0 to include RMS pitch in objective
 YAW_THRESHOLD_DEG = 60.0  # final heading deviation beyond this triggers penalty
 YAW_COST_WEIGHT = 1.0  # yaw spin-out penalty enabled
-VELOCITY_DEADZONE = False  # True = zero cost inside 1-sigma band; False = plain quadratic
 
 # ---------------------------------------------------------------------------
 # Search space (13 dimensions) — narrowed from 200-eval run analysis
