@@ -261,6 +261,7 @@ def _apply_magnetic_forces(
     step_cache["tau_int"] = tau_int
     step_cache["omega"] = omega
     step_cache["angle"] = angle
+    step_cache["north"] = north
 
     return angle
 
@@ -326,6 +327,9 @@ def _record_state(trajectory: list[dict], data, step_cache: dict | None = None) 
         "pos": data.qpos[:3].copy(),
         "vel": data.qvel[:3].copy(),
         "quat": data.xquat[1].copy(),
+        "joint_pos": data.qpos[7:11].copy(),
+        "joint_vel": data.qvel[6:10].copy(),
+        "leg_xquat": data.xquat[_LEG_BODY_SLICE].copy(),  # [4, 4] per-leg body world quats
     }
     if step_cache is not None:
         if "tau_ext" in step_cache:
@@ -336,6 +340,8 @@ def _record_state(trajectory: list[dict], data, step_cache: dict | None = None) 
             entry["omega"] = step_cache["omega"].copy()
         if "angle" in step_cache:
             entry["drive_angle"] = float(step_cache["angle"])
+        if "north" in step_cache:
+            entry["north"] = step_cache["north"].copy()
     trajectory.append(entry)
 
 
