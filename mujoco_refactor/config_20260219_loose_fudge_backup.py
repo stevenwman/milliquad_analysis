@@ -72,22 +72,18 @@ DEFAULT_CTRL_FREQ = 30.0  # Hz when no per-row control frequency is provided
 REFERENCE_DATA: list[dict[str, Any]] = [
     # Single leg (scene1)
     {"scene": "scene1", "ctrl_freq": 10.0, "speed": 0.0512, "speed_std": 0.0024, "weight": 1.0},
-    {"scene": "scene1", "ctrl_freq": 20.0, "speed": 0.1264, "speed_std": 0.0047, "weight": 1.0},
     {"scene": "scene1", "ctrl_freq": 30.0, "speed": 0.1187, "speed_std": 0.0127, "weight": 1.0},
     {"scene": "scene1", "ctrl_freq": 50.0, "speed": 0.1483, "speed_std": 0.0131, "weight": 1.0},
     # Double leg (scene2)
     {"scene": "scene2", "ctrl_freq": 10.0, "speed": 0.0832, "speed_std": 0.0014, "weight": 1.0},
-    {"scene": "scene2", "ctrl_freq": 20.0, "speed": 0.1131, "speed_std": 0.0420, "weight": 1.0},
     {"scene": "scene2", "ctrl_freq": 30.0, "speed": 0.1796, "speed_std": 0.0179, "weight": 1.0},
     {"scene": "scene2", "ctrl_freq": 50.0, "speed": 0.2633, "speed_std": 0.0257, "weight": 1.0},
     # Quad leg (scene4)
     {"scene": "scene4", "ctrl_freq": 10.0, "speed": 0.1121, "speed_std": 0.0060, "weight": 1.0},
-    {"scene": "scene4", "ctrl_freq": 20.0, "speed": 0.1841, "speed_std": 0.0156, "weight": 1.0},
     {"scene": "scene4", "ctrl_freq": 30.0, "speed": 0.2747, "speed_std": 0.0207, "weight": 1.0},
     {"scene": "scene4", "ctrl_freq": 50.0, "speed": 0.3274, "speed_std": 0.0556, "weight": 1.0},
     # Wheel (scene_wheel)
     {"scene": "scene_wheel", "ctrl_freq": 10.0, "speed": 0.1432, "speed_std": 0.0013, "weight": 1.0},
-    {"scene": "scene_wheel", "ctrl_freq": 20.0, "speed": 0.3058, "speed_std": 0.0068, "weight": 1.0},
     {"scene": "scene_wheel", "ctrl_freq": 30.0, "speed": 0.4493, "speed_std": 0.0183, "weight": 1.0},
 ]
 
@@ -125,25 +121,26 @@ OPTIMIZER_BACKEND = "cmaes"
 # CMAES_SIGMA0 = 0.3  # broad exploration
 # CMAES_SIGMA0 = 0.15  # tighter local search around lateral best
 # CMAES_SIGMA0 = 0.5  # wide exploration to escape stagnation
-CMAES_SIGMA0 = 0.3  # moderate exploration around loose_fudge best (warm-start)
+CMAES_SIGMA0 = 0.5  # wide exploration with permissive bounds
 # CMA-ES warm-start: set to a {param_name: value} dict to start from a known good point
 # instead of the space midpoint.  None = start from midpoint (cold start).
 # Paste best params from optimization_bests.csv to warm-start the next run.
-# Warm-start from best of 20260219T142207_loose_fudge (11-ref, cost=0.003416)
+# Warm-start from per-morphology sweep consensus (2026-02-18)
+# Converged params use geometric mean; divergent params use scene4 (middle morphology)
 CMAES_X0: dict[str, float] | None = {
-    "sliding_friction": 0.4140049078093072,
-    "torsional_friction": 0.00011099873412552575,
-    "rolling_friction": 6.9067464310571144e-06,
-    "solref_timeconst": 0.003307130816944404,
-    "solref_dampratio": 2.3660845121986203,
-    "solimp_dmin": 0.2529932362050259,
-    "solimp_delta_d": 0.4412728465683524,
-    "solimp_width": 3.5064211337397975e-05,
-    "solimp_midpoint": 0.6593543907283892,
-    "solimp_power": 5.58776761785696,
-    "magnetic_moment_fudge": 0.6717734036831045,
-    "magnetic_field_fudge": 1.0901771884633669,
-    "dof_damping": 5.582403996483286e-10,
+    "sliding_friction": 0.486,
+    "torsional_friction": 0.00051,
+    "rolling_friction": 2.55e-6,
+    "solref_timeconst": 0.00246,
+    "solref_dampratio": 2.42,
+    "solimp_dmin": 0.458,
+    "solimp_delta_d": 0.688,
+    "solimp_width": 2.18e-5,
+    "solimp_midpoint": 0.614,
+    "solimp_power": 5.31,
+    "magnetic_moment_fudge": 1.0,
+    "magnetic_field_fudge": 1.0,
+    "dof_damping": 5.6e-10,
 }
 
 # ---------------------------------------------------------------------------
@@ -160,7 +157,6 @@ PITCH_RMS_TARGET_DEG = 0.0  # target RMS pitch (deg); set when you have referenc
 PITCH_RMS_WEIGHT = 0.0  # set >0 to include RMS pitch in objective
 YAW_THRESHOLD_DEG = 60.0  # final heading deviation beyond this triggers penalty
 YAW_COST_WEIGHT = 1.0  # yaw spin-out penalty enabled
-VELOCITY_DEADZONE = False  # True = zero cost inside 1-sigma band; False = plain quadratic
 
 # ---------------------------------------------------------------------------
 # Search space (13 dimensions) — narrowed from 200-eval run analysis
