@@ -24,7 +24,7 @@
     <!-- Link body -->
     <body name="body" pos="0 0 0" quat="1 0 0 0" childclass="mulit_milli_quad">
       <freejoint name="body_freejoint"/>
-      <geom class="body" pos="0 0 0" quat="1 0 0 0"/>
+      <geom class="body" pos="0 0 -0.00268252" quat="0 0 1 0"/>  <!-- FLIPPED 180° around Y-axis (roll) + Z offset -->
       <!-- Link right_leg_box -->
       <body name="right_leg_box" pos="0.00342 -0.00298 -0.00134126" quat="0.707107 0.707107 -0 -0">
         <joint axis="0 0 1" name="FR" type="hinge"/>
