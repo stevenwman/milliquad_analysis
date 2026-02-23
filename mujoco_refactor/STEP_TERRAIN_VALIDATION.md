@@ -1,10 +1,79 @@
-# Step Terrain: Sim vs Experiment (2026-02-22)
+# Step Terrain: Sim vs Experiment (2026-02-22, revised 2026-02-23)
 
 Best-fit params from `results/20260219T142207_loose_fudge` (trained on flat terrain only).
 Step preset: 8 steps, 1mm high, 4.5mm long, 20mm final platform, 7.5mm flat lead.
 Wheel runs used 50mm flat lead for momentum buildup.
 
-## Velocity Comparison
+## Experimental Velocity Extraction Methods
+
+The experimental step CSVs (`experimental_data/csv/steps/`) contain instantaneous
+velocity from two tracking points (mass_A columns 3-4, mass_C columns 7-8).
+Forward velocity: `vx = 0.5 * (-vx_A + -vx_C)` (negated for camera convention, m/s to mm/s).
+
+Four extraction methods were compared:
+
+| method | description |
+|---|---|
+| **vx_last50%** | Forward velocity `vx`, averaged over last 50% of timesteps |
+| **\|v\|_last50%** | Total velocity `sqrt(vx^2 + vy^2)`, averaged over last 50% of timesteps |
+| **vx_mid300** | Forward velocity, averaged over middle 300 timesteps (50% index +/- 150) |
+| **vx_q75-300** | Forward velocity, averaged over 300 timesteps centered at 75% index (clamped to bounds) |
+
+Recordings are short (0.5-3.0s, 400-2900 timesteps) and capture mainly the step
+traversal itself — there is no long flat-ground lead-in captured on camera. The
+robot starts at x ~ 61-68mm and traverses in the -x direction.
+
+### Method Comparison (all values mm/s, mean across 3 trials)
+
+| config | vx_last50% | \|v\|_last50% | vx_mid300 | vx_q75-300 | student Table 1-1 |
+|---|---:|---:|---:|---:|---:|
+| scene1_f10 | 19.2 | 52.3 | 15.6 | 19.9 | 52.6 |
+| scene1_f20 | 53.4 | 108.0 | 42.1 | 47.3 | 100.0 |
+| scene1_f30 | 31.1 | 90.0 | 24.1 | 33.1 | 89.9 |
+| scene2_f10 | 52.4 | 83.7 | 31.9 | 54.2 | 77.3 |
+| scene2_f20 | 91.8 | 114.1 | 91.4 | 89.4 | 111.4 |
+| scene2_f30 | 138.1 | 153.8 | 135.1 | 133.5 | 157.9 |
+| scene4_f10 | 74.3 | 82.2 | 80.0 | 71.6 | 87.7 |
+| scene4_f20 | 105.0 | 116.5 | 99.6 | 103.8 | 109.7 |
+| scene4_f30 | 94.6 | 109.7 | 78.3 | 89.8 | 99.1 |
+| wheel_f30 | 96.0 | 101.3 | 89.6 | 93.8 | 98.2 |
+
+**Key finding**: The student's Table 1-1 values match **total velocity `|v|`**, not
+forward-only `vx`. No single column perfectly reproduces the student's numbers,
+suggesting a slightly different windowing or averaging method was used.
+
+The forward-only vs total velocity gap is largest for scene1 (1-leg), where the
+robot drifts laterally on steps: `vx=19.2` vs `|v|=52.3` (2.7x) at 10Hz.
+For scene4 and wheel the gap is small (5-18%) because those morphologies travel
+more straight.
+
+### Mid-300 vs q75-300
+
+The mid-300 window (50% index) can land in the initial acceleration phase for
+longer recordings, and scene1_f30 had one trial with negative velocity at midpoint
+(std 0.0248 vs mean 0.0241). The q75-300 window (75% index) captures later,
+more steady-state locomotion.
+
+For short recordings (scene2_f30: 428 samples), q75+150 exceeds the recording
+length. The window is clamped: `start = max(0, q75-150)`, `end = min(N, q75+150)`.
+End-of-recording sanity check confirmed no cliff-fall or anomalous behavior:
+vx remains positive (11-18 cm/s) and height increases (+0.7-1.7mm, consistent
+with climbing steps).
+
+**Decision**: Use **vx_q75-300** for optimizer targets. The q75 window gives more
+stable estimates for slow/long recordings (scene1_f30 std drops from 24.8 to 6.6 mm/s)
+while remaining safe to clamp for short recordings.
+
+### Which method to use for sim comparison?
+
+The simulation cost function measures **forward displacement only**: `pos[0]`
+(x-axis displacement divided by active time). For an apples-to-apples comparison,
+the experimental target should also be **forward-only `vx`**.
+
+The step-aware cost function measures velocity only after the robot enters the
+step field (`pos[0] >= flat_lead`), avoiding flat-lead acceleration inflation.
+
+## Velocity Comparison (using vx_last50%, forward-only)
 
 | config | exp (mm/s) | exp std | sim (mm/s) | error% |
 |---|---:|---:|---:|---:|
@@ -63,8 +132,12 @@ flat-surface fitting can't constrain.
 
 Step CSVs: `experimental_data/csv/steps/`
 - Naming: `s{freq}{morph}{trial}-{trial}.csv` (e.g. `s30leg1-1.csv`)
-- 3 trials per condition, last 50% of recording for steady-state
+- Columns: `t, x_A, y_A, vx_A, vy_A, x_C, y_C, vx_C, vy_C, omega_B, theta_B, theta_C`
+- 3 trials per condition
+- Recording duration: 0.5s (fast) to 3.0s (slow), 400-2900 timesteps
+- Robot starts at x ~ 61-68mm, traverses in -x direction (camera convention)
 - No wheel data at 10Hz or 20Hz (only 30Hz was tested)
+- Velocity extraction script: `mujoco_refactor/analysis/analyze_step_terrain.py`
 
 ## Reproducing
 
@@ -80,5 +153,5 @@ uv run python terrain_test.py results/20260219T142207_loose_fudge \
     --preset step_default --scenes scene_wheel --freqs 10 20 30 --flat-lead 0.05 --record
 
 # Comparison script
-uv run python analyze_step_terrain.py
+uv run python analysis/analyze_step_terrain.py
 ```

@@ -22,7 +22,7 @@ def _extract_steps(file_name: str) -> tuple[np.ndarray, np.ndarray, np.ndarray, 
     t = dat[:, 0]
     vx = 0.5 * ((-dat[:, 3] * MM_SCALE) + (-dat[:, 7] * MM_SCALE))
     vy = 0.5 * ((-dat[:, 4] * MM_SCALE) + (-dat[:, 8] * MM_SCALE))
-    v = np.sqrt(vx**2 + vy**2)
+    v = vx  # forward velocity only (consistent with flat_pipeline and sim)
     y = 0.5 * (dat[:, 2] + dat[:, 6]) * MM_SCALE
     theta = dat[:, 11]
     omega = dat[:, 10]
