@@ -26,7 +26,7 @@ class PlotlyBackend:
         )
         if self.save:
             self.out_dir.mkdir(parents=True, exist_ok=True)
-            fig.write_html(self.out_dir / f"{file_stem}.html", include_plotlyjs="cdn")
+            fig.write_html(self.out_dir / f"{file_stem}.html", include_plotlyjs=True)
         if self.show:
             fig.show()
 
