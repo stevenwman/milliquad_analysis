@@ -2,6 +2,11 @@
 """Detailed friction diagnostic: sweep each friction component independently
 and also check the actual o_friction values that MuJoCo sees at contact time."""
 
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 import mujoco
 import numpy as np
 from config import space, sim_params_from_point, MJCF_PATHS, SIM_TIMESTEP

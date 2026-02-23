@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """Test condim=6: torsional with rolling held low, and finer rolling sweep."""
 
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 import mujoco
 import numpy as np
 from config import space, sim_params_from_point, MJCF_PATHS

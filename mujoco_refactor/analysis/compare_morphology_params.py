@@ -10,13 +10,15 @@ import math
 import pathlib
 import sys
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
+
 from config import space
 
 PARAM_NAMES = [dim.name for dim in space] + ["solimp_dmax"]
 MORPHOLOGIES = ["scene1", "scene2", "scene4", "scene_wheel"]
 FREQUENCIES = ["f10", "f30", "f50"]
 
-results_dir = pathlib.Path(__file__).parent / "results"
+results_dir = pathlib.Path(__file__).parent.parent / "results"
 
 
 def find_latest(suffix: str) -> pathlib.Path | None:

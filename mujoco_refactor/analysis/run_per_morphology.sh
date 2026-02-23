@@ -2,7 +2,7 @@
 # Run independent optimizations split by morphology, frequency, and combined.
 # Usage: bash run_per_morphology.sh [n_calls] [--loop-morphs | --loop-freqs | --loop-combined]
 set -euo pipefail
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 
 N=${1:-600}
 MODE=${2:-all}  # all, --loop-morphs, --loop-freqs, --loop-combined

@@ -12,6 +12,11 @@ Baseline chosen to produce real locomotion at condim=6
 (rolling_friction lowered from old best since >1e-3 kills sim at condim=6).
 """
 
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 import numpy as np
 
 from config import space, sim_params_from_point, MJCF_PATHS

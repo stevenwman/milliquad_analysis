@@ -549,9 +549,9 @@ def _append_best_csv(best: dict, n_done: int, elapsed_min: float) -> None:
             row[f"yaw_{rid}"] = f"{ry.get(rid, 0.0):.1f}"
             row[f"pitch_rms_{rid}"] = f"{rp.get(rid, 0.0):.2f}"
         for dim in space:
-            row[dim.name] = repr(best['params'][dim.name])
+            row[dim.name] = float(best['params'][dim.name])
         bp = best["params"]
-        row["solimp_dmax"] = repr(bp['solimp_dmin'] + bp['solimp_delta_d'] * (0.9999 - bp['solimp_dmin']))
+        row["solimp_dmax"] = float(bp['solimp_dmin'] + bp['solimp_delta_d'] * (0.9999 - bp['solimp_dmin']))
         w.writerow(row)
 
 
