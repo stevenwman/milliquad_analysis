@@ -97,7 +97,11 @@ for r in rows:
         print(f"  {'-' * 50}")
         for pname in _PARAM_NAMES:
             if pname in r:
-                val = float(r[pname])
+                raw = r[pname]
+                # Handle np.float64(...) string from older CSVs
+                if raw.startswith("np.float64("):
+                    raw = raw[len("np.float64("):-1]
+                val = float(raw)
                 flag = _bound_flag(pname, val)
                 print(f"  {pname:<28} {val:>14.6g}  {flag}")
     print()

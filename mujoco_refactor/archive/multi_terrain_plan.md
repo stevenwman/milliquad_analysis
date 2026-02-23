@@ -351,3 +351,34 @@ No changes to existing files.
 - **Preset not found**: Print available presets and exit with clear error.
 - **CLI override + preset**: CLI args like `--step-height 0.003` shallow-merge into
   the preset dict, so you can tweak one param without redefining everything.
+
+---
+
+## Implementation Notes (post-implementation)
+
+### MJCF relative path resolution
+MuJoCo resolves `<include>`, mesh files, and textures relative to the XML file's
+directory. We cannot copy the XML to a temp dir because the robot XMLs use relative
+`<include file="robot_4.xml">` and mesh references (`assets/magnet.stl`).
+
+**Solution**: Write edited XMLs **alongside the original** in the same source directory
+with a `_terrain_tmp.xml` suffix. Track these in `_temp_xml_files` list and clean up
+via `cleanup_temp_xmls()` in a `try/finally` block.
+
+### MuJoCo hfield z_bottom
+`generate_terrain_hfield()` in `utils/terrain_mesh.py` returns `z_bottom=0.0`.
+MuJoCo requires all hfield size params to be strictly positive. Fixed in
+`_inject_rough()` by clamping `z_bottom` to `0.001` when zero.
+
+### Step terrain tumble/yaw artifact
+Step presets produce tumble=Y and yaw~180° for most configs. This is real physics:
+the robot climbs the staircase then falls off a cliff at the end (total elevation =
+`step_count * step_height`, e.g. 7.5mm for step_default). The 20mm `final_step_length`
+is not long enough to prevent the robot from reaching the edge during 3s sim. Options:
+- Increase `final_step_length` (e.g. 0.1m) to keep the robot on the platform
+- Increase `--duration` to see post-fall recovery
+- Accept it as a realistic terrain challenge metric
+
+### Rough terrain mild preset
+`rough_mild` (0.5mm height std) barely affects any morphology (ratio 0.94–1.04).
+Use `rough_harsh` (1.0mm std) for meaningful differentiation.

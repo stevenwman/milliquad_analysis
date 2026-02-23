@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
 """Find the exact dead-zone boundary for solref_timeconst."""
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 import numpy as np
 from config import space, sim_params_from_point, MJCF_PATHS
 from simulation_fast import run_simulation

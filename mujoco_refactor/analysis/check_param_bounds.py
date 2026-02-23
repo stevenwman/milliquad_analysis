@@ -10,7 +10,7 @@ PARAMS = [
     "solimp_dmin", "solimp_dmax", "solimp_width", "solimp_midpoint", "solimp_power",
 ]
 
-results_dir = pathlib.Path(__file__).parent / "results"
+results_dir = pathlib.Path(__file__).parent.parent / "results"
 dirs = sorted(results_dir.iterdir())
 
 rows = []
