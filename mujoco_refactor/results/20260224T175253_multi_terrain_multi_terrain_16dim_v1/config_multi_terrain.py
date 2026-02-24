@@ -95,7 +95,24 @@ BEST_CSV_PATH = "optimization_bests.csv"
 # These params achieve cost=0.380 on flat but fail badly on steps (~93% error).
 # Multi-terrain optimization should find params that balance both terrains.
 # ---------------------------------------------------------------------------
-CMAES_X0: dict[str, float] | None = None  # Cold start from search space midpoints
+CMAES_X0: dict[str, float] | None = {
+    "sliding_friction": 0.48734565718766704,
+    "torsional_friction": 0.00025167486271239974,
+    "rolling_friction": 4.115853923336379e-06,
+    "solref_timeconst": 0.002316749205053682,
+    "solref_dampratio": 3.3733148987037813,
+    "solimp_dmin": 0.45155836837876284,
+    "solimp_delta_d": 0.6302833354616117,
+    "solimp_width": 2.005399484434065e-05,
+    "solimp_midpoint": 0.2865197391827468,
+    "solimp_power": 5.231485448700575,
+    "magnetic_moment_fudge": 0.6532045074731974,
+    "magnetic_field_fudge": 1.0437234064669991,
+    "dof_damping": 4.989444645973366e-10,
+    "noslip_iterations":    0,
+    "noslip_tolerance":     1e-6,
+    "margin":               0.0,
+}
 
 # ---------------------------------------------------------------------------
 # Step terrain geometry — uniform for all morphologies
