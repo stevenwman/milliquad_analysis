@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Test current flat-optimized params on step terrain with jitter."""
+"""Test 16-dim optimized params on step terrain with jitter."""
 
 import csv
 import sys
 from pathlib import Path
 import numpy as np
 
-from config import sim_params_from_point
+from config_new import sim_params_from_point
 from config_step import STEP_START_X, REFERENCE_DATA
-from simulation_fast import run_simulation
+from simulation_fast_new import run_simulation
 
 # Step terrain suffix
 STEP_SUFFIX = "_step_8x1mm_4.5L_50lead"
@@ -18,8 +18,8 @@ N_JITTER_TRIALS = 5
 JITTER_YAW_DEG = 5.0
 BASE_SEED = 12345
 
-# Load best params from 13-dim flat optimization (best flat cost: 0.380)
-BEST_RUN = "results/20260222T181114_with_20hz_no-deadzone"
+# Load best params from 16-dim optimization
+BEST_RUN = "results/20260223T193537_16dim_cold"
 best_csv = Path(BEST_RUN) / "optimization_bests.csv"
 
 if not best_csv.exists():
@@ -30,7 +30,7 @@ rows = list(csv.DictReader(open(best_csv)))
 best = rows[-1]  # Last row = current best
 
 print(f"=" * 80)
-print(f"STEP TERRAIN VALIDATION: Current flat-optimized params")
+print(f"STEP TERRAIN VALIDATION: 16-dim optimized params")
 print(f"=" * 80)
 print(f"Source: {BEST_RUN}")
 print(f"  Cost: {best['cost']}")
@@ -41,15 +41,16 @@ print(f"Jitter: {N_JITTER_TRIALS} trials, ±{JITTER_YAW_DEG}° yaw variation")
 print(f"Aggregation: BEST (min cost) trial")
 print()
 
-# Extract params
+# Extract params (16 dimensions)
 param_names = [
     'sliding_friction', 'torsional_friction', 'rolling_friction',
     'solref_timeconst', 'solref_dampratio', 'solimp_dmin', 'solimp_delta_d',
     'solimp_width', 'solimp_midpoint', 'solimp_power',
-    'magnetic_moment_fudge', 'magnetic_field_fudge', 'dof_damping'
+    'magnetic_moment_fudge', 'magnetic_field_fudge', 'dof_damping',
+    'noslip_iterations', 'noslip_tolerance', 'margin'
 ]
 
-# Handle numpy-wrapped strings like 'np.float64(0.123)'
+# Handle numpy-wrapped strings
 def parse_value(s):
     s = str(s).strip()
     if s.startswith('np.float64('):
@@ -136,7 +137,7 @@ def compute_cost_components(trajectory, target_vel, step_start_x=STEP_START_X):
     return {"velocity": vel_cost, "lateral": lateral, "tumble": tumble, "vel_sim": vel}
 
 # Video output directory
-video_dir = Path("step_videos_13dim")
+video_dir = Path("step_videos_16dim")
 video_dir.mkdir(exist_ok=True)
 
 print(f"{'Condition':<20} {'Ref':>10} {'Best':>10} {'Worst':>10} {'Spread':>8} {'RefErr%':>8}")
