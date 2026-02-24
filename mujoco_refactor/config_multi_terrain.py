@@ -5,7 +5,7 @@ based on correlation analysis. Includes scene_wheel f20 as failure mode
 constraint (target velocity = 0) from experimental observations.
 
 Reference set design (19 total):
-- Flat terrain (11 refs): scene1/2/4 × f10/f30/f50 + scene_wheel f20/f30
+- Flat terrain (11 refs): scene1/2/4 × f10/f30/f50 + scene_wheel f10/f30
 - Step terrain (8 refs): scene1/2/4 × f10/f30 + scene_wheel f20/f30
 
 See analyze_ref_correlations.py for correlation analysis justifying f20 dropout.
@@ -145,7 +145,7 @@ STEP_START_X: float = STEP_PRESET["flat_lead"]
 REFERENCE_DATA: list[dict[str, Any]] = [
     # ========================================================================
     # FLAT TERRAIN (11 references)
-    # Source: experimental_data/csv/flat/, mean velocity over full recording
+    # Source: experimental_data/csv/flat/, mean velocity over steady-state window
     # ========================================================================
 
     # Single leg (scene1) — flat
@@ -164,9 +164,8 @@ REFERENCE_DATA: list[dict[str, Any]] = [
     {"scene": "scene4", "ctrl_freq": 50.0, "speed": 0.3274, "speed_std": 0.0556, "weight": 1.0, "terrain": "flat"},
 
     # Wheel (scene_wheel) — flat
-    # f20: FAILURE MODE — experimentally observed to not move, target=0
-    {"scene": "scene_wheel", "ctrl_freq": 20.0, "speed": 0.0000, "speed_std": 0.0050, "weight": 2.0, "terrain": "flat"},
-    {"scene": "scene_wheel", "ctrl_freq": 30.0, "speed": 0.4493, "speed_std": 0.0183, "weight": 1.0, "terrain": "flat"},
+    {"scene": "scene_wheel", "ctrl_freq": 10.0, "speed": 0.1423, "speed_std": 0.0012, "weight": 1.0, "terrain": "flat"},
+    {"scene": "scene_wheel", "ctrl_freq": 30.0, "speed": 0.4578, "speed_std": 0.0089, "weight": 1.0, "terrain": "flat"},
 
     # ========================================================================
     # STEP TERRAIN (8 references)
@@ -187,7 +186,7 @@ REFERENCE_DATA: list[dict[str, Any]] = [
     {"scene": "scene4", "ctrl_freq": 30.0, "speed": 0.0898, "speed_std": 0.0202, "weight": 1.0, "terrain": "step"},
 
     # Wheel (scene_wheel) — step
-    # f20: FAILURE MODE — same as flat, target=0
+    # f20: FAILURE MODE — robot doesn't move at 20Hz on steps, target=0
     {"scene": "scene_wheel", "ctrl_freq": 20.0, "speed": 0.0000, "speed_std": 0.0050, "weight": 2.0, "terrain": "step"},
     {"scene": "scene_wheel", "ctrl_freq": 30.0, "speed": 0.0938, "speed_std": 0.0097, "weight": 1.0, "terrain": "step"},
 ]
@@ -289,12 +288,13 @@ def validate_reference_data():
         assert "terrain" in row, "Missing 'terrain' field"
         assert row["terrain"] in ["flat", "step"], f"Invalid terrain: {row['terrain']}"
 
-    # Check scene_wheel f20 failure modes
+    # Check scene_wheel f20 failure mode (step only, target=0)
     wheel_f20_refs = [r for r in REFERENCE_DATA if r["scene"] == "scene_wheel" and r["ctrl_freq"] == 20.0]
-    assert len(wheel_f20_refs) == 2, f"Expected 2 scene_wheel f20 refs (flat+step), got {len(wheel_f20_refs)}"
+    assert len(wheel_f20_refs) == 1, f"Expected 1 scene_wheel f20 ref (step only), got {len(wheel_f20_refs)}"
     for r in wheel_f20_refs:
         assert r["speed"] == 0.0, f"scene_wheel f20 should have speed=0.0 (failure mode), got {r['speed']}"
         assert r["weight"] == 2.0, f"scene_wheel f20 should have weight=2.0 (emphasize constraint), got {r['weight']}"
+        assert r["terrain"] == "step", f"scene_wheel f20 should be step terrain only, got {r['terrain']}"
 
     print("✓ REFERENCE_DATA validation passed")
     print(f"  - {len(flat_refs)} flat terrain references")

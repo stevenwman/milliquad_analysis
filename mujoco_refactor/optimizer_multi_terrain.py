@@ -853,7 +853,7 @@ def _create_cmaes_optimizer(es_override=None):
 # ---------------------------------------------------------------------------
 
 def _run_batch_optimization(all_results: list[dict], pool: multiprocessing.Pool,
-                            es_resume=None) -> OptResult:
+                            run_dir: pathlib.Path, es_resume=None) -> OptResult:
     """Batch optimization loop: propose, evaluate, tell, repeat."""
     ask, tell, es = _create_cmaes_optimizer(es_override=es_resume)
     if es_resume is not None:
@@ -938,7 +938,7 @@ def _run_batch_optimization(all_results: list[dict], pool: multiprocessing.Pool,
 
         # Save CMA-ES state every batch for resumption
         import pickle
-        state_path = pathlib.Path("cmaes_state.pkl")
+        state_path = run_dir / "cmaes_state.pkl"
         with open(state_path, "wb") as f:
             pickle.dump({
                 "es": es,
@@ -1075,7 +1075,7 @@ if __name__ == "__main__":
     # Run optimization with multiprocessing
     with multiprocessing.Pool(processes=os.cpu_count()) as pool:
         all_results = []
-        result = _run_batch_optimization(all_results, pool, es_resume=es_resume)
+        result = _run_batch_optimization(all_results, pool, run_dir, es_resume=es_resume)
 
     print(f"\n{'='*80}")
     print(f"OPTIMIZATION COMPLETE")
