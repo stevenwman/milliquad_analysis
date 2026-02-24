@@ -29,7 +29,7 @@ from typing import Any, NamedTuple
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 
-from config_step import (
+from config_step_new import (
     BATCH_SIZE,
     BEST_CSV_PATH,
     CMAES_SIGMA0,
@@ -37,6 +37,7 @@ from config_step import (
     COST_FAILURE,
     CSV_PATH,
     DEFAULT_CTRL_FREQ,
+    FAILURE_MODE_VEL_SCALE,
     INIT_JITTER_SEED,
     INIT_JITTER_TRIALS,
     INIT_YAW_JITTER_DEG,
@@ -68,7 +69,7 @@ from config_step import (
 )
 
 # ---- Simulation module selector ----
-SIM_MODULE = "simulation_fast"
+SIM_MODULE = "simulation_fast_new"
 
 
 class OptResult(NamedTuple):
@@ -173,15 +174,21 @@ def calculate_cost(
         forward_displacement = final_state["pos"][0] - enter_state["pos"][0]
         avg_forward_velocity = forward_displacement / active_duration
 
-    # Velocity error (relative squared, no deadzone)
+    # Velocity error
     vel_deviation = avg_forward_velocity - target_velocity
-    if VELOCITY_DEADZONE and speed_std > 0.0 and abs(vel_deviation) <= speed_std:
-        velocity_error = 0.0
-    elif VELOCITY_DEADZONE and speed_std > 0.0:
-        excess = abs(vel_deviation) - speed_std
-        velocity_error = (excess / target_velocity) ** 2
+    if target_velocity > 1e-6:
+        # Normal case: relative squared error
+        if VELOCITY_DEADZONE and speed_std > 0.0 and abs(vel_deviation) <= speed_std:
+            velocity_error = 0.0
+        elif VELOCITY_DEADZONE and speed_std > 0.0:
+            excess = abs(vel_deviation) - speed_std
+            velocity_error = (excess / target_velocity) ** 2
+        else:
+            velocity_error = (vel_deviation / target_velocity) ** 2
     else:
-        velocity_error = (vel_deviation / target_velocity) ** 2
+        # Failure mode (target=0): penalize any movement, normalized so that
+        # moving at FAILURE_MODE_VEL_SCALE produces cost=1.0
+        velocity_error = (avg_forward_velocity / FAILURE_MODE_VEL_SCALE) ** 2
 
     # Lateral displacement (from step entry to end)
     lateral_displacement = abs(final_state["pos"][1] - enter_state["pos"][1])
@@ -254,7 +261,7 @@ def _evaluate_one_scene(args):
 
     import importlib
     _sim = importlib.import_module(SIM_MODULE)
-    from config_step import sim_params_from_point as _sim_params_from_point
+    from config_step_new import sim_params_from_point as _sim_params_from_point
 
     sim_params = _sim_params_from_point(point)
     scene_name = ref_row["scene"]
@@ -822,8 +829,8 @@ if __name__ == "__main__":
         run_tag += "_step"
     run_dir_results = pathlib.Path("results") / run_tag
     run_dir_results.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(pathlib.Path(__file__).parent / "config_step.py", run_dir_results / "config_step.py")
-    shutil.copy2(pathlib.Path(__file__).parent / "config.py", run_dir_results / "config.py")
+    shutil.copy2(pathlib.Path(__file__).parent / "config_step_new.py", run_dir_results / "config_step_new.py")
+    shutil.copy2(pathlib.Path(__file__).parent / "config_new.py", run_dir_results / "config_new.py")
     print(f"  Run directory: {run_dir_results}/")
 
     # Write CSVs into run directory

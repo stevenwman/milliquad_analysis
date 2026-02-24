@@ -74,7 +74,7 @@ from config_multi_terrain import (
 )
 
 # ---- Simulation module selector ----
-SIM_MODULE = "simulation_fast"
+SIM_MODULE = "simulation_fast_new"
 
 
 class OptResult(NamedTuple):
