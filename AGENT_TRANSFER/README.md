@@ -36,8 +36,8 @@ mujoco_refactor/results/20260224T131848_multi_terrain_multi_v1/
 ## Configuration Summary
 
 ### References: 19 total (38 sims/eval)
-- Flat: scene1/2/4 × f10/f30/f50 + scene_wheel f20/f30 (11 refs)
-- Step: scene1/2/4 × f10/f30 + scene_wheel f20/f30 (8 refs)
+- Flat: scene1/2/4 × f10/f30/f50 + scene_wheel f10/f30 (11 refs)
+- Step: scene1/2/4 × f10/f30 + scene_wheel f20/f30 (8 refs, f20 = failure mode)
 - Jitter: 2 trials per reference
 
 ### Cost Structure
