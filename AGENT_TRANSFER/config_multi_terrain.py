@@ -47,32 +47,41 @@ from config import (
 # ---------------------------------------------------------------------------
 # Multi-terrain overrides
 # ---------------------------------------------------------------------------
-SIM_DURATION = 5.0  # Use step terrain duration (longer than flat's 3.0s)
+SIM_DURATION = 3.0  # Same as flat terrain (faster evaluation)
 N_CALLS = 4800      # More budget for multi-terrain (2× single-terrain)
 BATCH_SIZE = 8
 INIT_YAW_JITTER_DEG = 2
-INIT_JITTER_TRIALS = 3
+INIT_JITTER_TRIALS = 2
 INIT_JITTER_SEED = 12345
 VELOCITY_DEADZONE = False
 DEFAULT_CTRL_FREQ = 30.0
 
-# Cost weights (hierarchical: terrain-level then component-level)
+# Terrain-level weights (hierarchical cost)
 FLAT_TERRAIN_WEIGHT = 1.0   # Weight for flat terrain aggregate cost
 STEP_TERRAIN_WEIGHT = 1.0   # Weight for step terrain aggregate cost
 
-# Component weights (applied within each terrain type)
-VELOCITY_COST_WEIGHT = 5.0
-TUMBLE_COST_WEIGHT = 1.0
-LATERAL_COST_WEIGHT = 1.0
-VELOCITY_VARIANCE_WEIGHT = 2.0
-YAW_COST_WEIGHT = 0.0       # Disabled due to cliff-fall artifact on steps
+# Component weights (terrain-specific)
+# Flat terrain: higher lateral penalty, yaw enabled
+FLAT_VELOCITY_COST_WEIGHT = 5.0
+FLAT_TUMBLE_COST_WEIGHT = 1.0
+FLAT_LATERAL_COST_WEIGHT = 5.0
+FLAT_YAW_COST_WEIGHT = 1.0
+
+# Step terrain: lower lateral penalty, yaw disabled (cliff-fall artifact)
+STEP_VELOCITY_COST_WEIGHT = 5.0
+STEP_TUMBLE_COST_WEIGHT = 1.0
+STEP_LATERAL_COST_WEIGHT = 1.0
+STEP_YAW_COST_WEIGHT = 0.0
+
+# Shared constants
+VELOCITY_VARIANCE_WEIGHT = 2.0  # Not used currently
 YAW_THRESHOLD_DEG = 60.0
 TUMBLE_THRESHOLD = 0.0
 TUMBLE_PENALTY_SCALE = 0.1
 COST_FAILURE = 1e6
 
 # CMA-ES
-CMAES_SIGMA0 = 0.3
+CMAES_SIGMA0 = 0.5
 OPTIMIZER_RANDOM_STATE = 69420
 VERBOSE_BATCH = True
 PROFILE_BATCH = True

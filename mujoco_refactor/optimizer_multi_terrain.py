@@ -41,7 +41,14 @@ from config_multi_terrain import (
     INIT_JITTER_SEED,
     INIT_JITTER_TRIALS,
     INIT_YAW_JITTER_DEG,
-    LATERAL_COST_WEIGHT,
+    FLAT_LATERAL_COST_WEIGHT,
+    FLAT_TUMBLE_COST_WEIGHT,
+    FLAT_VELOCITY_COST_WEIGHT,
+    FLAT_YAW_COST_WEIGHT,
+    STEP_LATERAL_COST_WEIGHT,
+    STEP_TUMBLE_COST_WEIGHT,
+    STEP_VELOCITY_COST_WEIGHT,
+    STEP_YAW_COST_WEIGHT,
     MJCF_PATHS,
     N_CALLS,
     OPTIMIZER_RANDOM_STATE,
@@ -52,14 +59,11 @@ from config_multi_terrain import (
     STEP_PRESET,
     STEP_START_X,
     STEP_TERRAIN_WEIGHT,
-    TUMBLE_COST_WEIGHT,
     TUMBLE_PENALTY_SCALE,
     TUMBLE_THRESHOLD,
-    VELOCITY_COST_WEIGHT,
     VELOCITY_DEADZONE,
     VELOCITY_VARIANCE_WEIGHT,
     VERBOSE_BATCH,
-    YAW_COST_WEIGHT,
     YAW_THRESHOLD_DEG,
     csv_fieldnames,
     point_to_params,
@@ -221,10 +225,10 @@ def calculate_cost_flat(
     yaw_cost = max(0.0, yaw_deg - YAW_THRESHOLD_DEG) / 180.0
 
     total_cost = (
-        VELOCITY_COST_WEIGHT * velocity_cost
-        + LATERAL_COST_WEIGHT * lateral_cost
-        + TUMBLE_COST_WEIGHT * tumble_penalty
-        + YAW_COST_WEIGHT * yaw_cost
+        FLAT_VELOCITY_COST_WEIGHT * velocity_cost
+        + FLAT_LATERAL_COST_WEIGHT * lateral_cost
+        + FLAT_TUMBLE_COST_WEIGHT * tumble_penalty
+        + FLAT_YAW_COST_WEIGHT * yaw_cost
     )
 
     return {
@@ -322,10 +326,10 @@ def calculate_cost_step(
     yaw_cost = max(0.0, yaw_deg - YAW_THRESHOLD_DEG) / 180.0
 
     total_cost = (
-        VELOCITY_COST_WEIGHT * velocity_cost
-        + LATERAL_COST_WEIGHT * lateral_cost
-        + TUMBLE_COST_WEIGHT * tumble_penalty
-        + YAW_COST_WEIGHT * yaw_cost
+        STEP_VELOCITY_COST_WEIGHT * velocity_cost
+        + STEP_LATERAL_COST_WEIGHT * lateral_cost
+        + STEP_TUMBLE_COST_WEIGHT * tumble_penalty
+        + STEP_YAW_COST_WEIGHT * yaw_cost
     )
 
     return {
@@ -544,7 +548,36 @@ def _aggregate_scene_results(points: list, scene_results: list) -> list[dict]:
             ) / w if w > 0 else 0.0
             terrain_avg_costs[terrain] = d["terrain_costs"][terrain] / w if w > 0 else 0.0
 
-        # Hierarchical cost: weighted sum across terrains
+        # Add velocity variance penalty within each terrain
+        # (penalizes inconsistent performance across references)
+        ref_rows_lookup = {row["id"]: row for row in reference_rows()}
+        terrain_variance_penalties = {}
+
+        for terrain in ["flat", "step"]:
+            # Get all references for this terrain
+            terrain_refs = [rid for rid in ref_avg_velocities if ref_rows_lookup[rid]["terrain"] == terrain]
+
+            if len(terrain_refs) > 1:
+                # Compute relative velocity errors for this terrain
+                rel_errors = []
+                for rid in terrain_refs:
+                    target_vel = ref_rows_lookup[rid]["speed"]
+                    if target_vel > 1e-6:  # Skip failure mode constraints (target=0)
+                        sim_vel = ref_avg_velocities[rid]
+                        rel_error = (sim_vel - target_vel) / target_vel
+                        rel_errors.append(rel_error)
+
+                # Add variance penalty if we have multiple valid errors
+                if len(rel_errors) > 1:
+                    variance_penalty = VELOCITY_VARIANCE_WEIGHT * float(np.var(rel_errors))
+                    terrain_variance_penalties[terrain] = variance_penalty
+                    terrain_avg_costs[terrain] += variance_penalty
+                else:
+                    terrain_variance_penalties[terrain] = 0.0
+            else:
+                terrain_variance_penalties[terrain] = 0.0
+
+        # Hierarchical cost: weighted sum across terrains (includes variance)
         total_cost = (
             FLAT_TERRAIN_WEIGHT * terrain_avg_costs.get("flat", 0.0)
             + STEP_TERRAIN_WEIGHT * terrain_avg_costs.get("step", 0.0)
@@ -637,10 +670,25 @@ def _print_point_results(results: list[dict], n_this: int) -> None:
         # Print terrain-level summary
         terrain_vel = r.get("terrain_avg_velocities", {})
         terrain_cost = r.get("terrain_avg_costs", {})
-        print(f"      FLAT terrain:  vel={terrain_vel.get('flat', 0)*100:.2f} cm/s  cost={terrain_cost.get('flat', 0):.4f}")
-        print(f"      STEP terrain:  vel={terrain_vel.get('step', 0)*100:.2f} cm/s  cost={terrain_cost.get('step', 0):.4f}")
+        print(f"      TERRAIN LEVEL:")
+        print(f"        FLAT: vel={terrain_vel.get('flat', 0)*100:>5.1f} cm/s  cost={terrain_cost.get('flat', 0):>7.4f}")
+        print(f"        STEP: vel={terrain_vel.get('step', 0)*100:>5.1f} cm/s  cost={terrain_cost.get('step', 0):>7.4f}")
 
-        _print_ref_table(r, ref_rows, indent=6)
+        # Print scene-level breakdown
+        scene_vel = r.get("scene_avg_velocities", {})
+        scene_cost = r.get("scene_avg_costs", {})
+        print(f"      SCENE LEVEL:")
+        for scene in ["scene1", "scene2", "scene4", "scene_wheel"]:
+            flat_key = f"{scene}_flat"
+            step_key = f"{scene}_step"
+            flat_vel = scene_vel.get(flat_key, 0) * 100
+            flat_cost = scene_cost.get(flat_key, 0)
+            step_vel = scene_vel.get(step_key, 0) * 100
+            step_cost = scene_cost.get(step_key, 0)
+            print(f"        {scene:12}  flat: vel={flat_vel:>5.1f}cm/s cost={flat_cost:>7.4f}   step: vel={step_vel:>5.1f}cm/s cost={step_cost:>7.4f}")
+
+        print(f"      INDIVIDUAL REFS:")
+        _print_ref_table(r, ref_rows, indent=8)
 
 
 def _print_ref_table(r: dict, ref_rows: list[dict], indent: int = 4) -> None:
