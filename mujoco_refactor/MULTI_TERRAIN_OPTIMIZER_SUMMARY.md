@@ -23,7 +23,7 @@ FLAT TERRAIN (11 refs):
   - scene1 × [f10, f30, f50]
   - scene2 × [f10, f30, f50]
   - scene4 × [f10, f30, f50]
-  - scene_wheel × [f20*, f30]
+  - scene_wheel × [f10, f30]
 
 STEP TERRAIN (8 refs):
   - scene1 × [f10, f30]
@@ -31,7 +31,7 @@ STEP TERRAIN (8 refs):
   - scene4 × [f10, f30]
   - scene_wheel × [f20*, f30]
 
-* = Failure mode constraint (target=0.0, weight=2.0)
+* = Failure mode constraint (f20 only, target=0.0, weight=2.0)
 ```
 
 **Computational load**: 19 refs × 2 jitter trials = **38 simulations per evaluation**
