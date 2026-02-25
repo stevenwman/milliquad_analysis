@@ -94,7 +94,7 @@ REFERENCE_DATA: list[dict[str, Any]] = [
 # ---------------------------------------------------------------------------
 # Optimization hyper-parameters
 # ---------------------------------------------------------------------------
-N_CALLS = 4800  # increased budget for 16-dim local refinement
+N_CALLS = 2400  # total optimization iterations (combined needs more budget than per-scene)
 SIM_DURATION = 3.0  # seconds per simulation run
 SIMULATION_TIMEOUT = 35  # wall-clock seconds per worker
 ROLLOUTS_PER_SCENE = 1  # sims per scene per iteration (>1 only for noisy sims)
@@ -125,30 +125,13 @@ OPTIMIZER_BACKEND = "cmaes"
 # CMAES_SIGMA0 = 0.3  # broad exploration
 # CMAES_SIGMA0 = 0.15  # tighter local search around lateral best
 # CMAES_SIGMA0 = 0.5  # wide exploration to escape stagnation
-CMAES_SIGMA0 = 0.15  # local refinement around 13-dim best (warm-start with MuJoCo defaults)
+CMAES_SIGMA0 = 0.3  # moderate exploration around loose_fudge best (warm-start)
 # CMA-ES warm-start: set to a {param_name: value} dict to start from a known good point
 # instead of the space midpoint.  None = start from midpoint (cold start).
 # Paste best params from optimization_bests.csv to warm-start the next run.
-# Warm-start from 13-dim best (20260222T181114_with_20hz_no-deadzone, cost=0.380)
-# 3 new solver params initialized at MuJoCo defaults (NOT space midpoints!)
-CMAES_X0: dict[str, float] | None = {
-    "sliding_friction": 0.48734565718766704,
-    "torsional_friction": 0.00025167486271239974,
-    "rolling_friction": 4.115853923336379e-06,
-    "solref_timeconst": 0.002316749205053682,
-    "solref_dampratio": 3.3733148987037813,
-    "solimp_dmin": 0.45155836837876284,
-    "solimp_delta_d": 0.6302833354616117,
-    "solimp_width": 2.005399484434065e-05,
-    "solimp_midpoint": 0.2865197391827468,
-    "solimp_power": 5.231485448700575,
-    "magnetic_moment_fudge": 0.6532045074731974,
-    "magnetic_field_fudge": 1.0437234064669991,
-    "dof_damping": 4.989444645973366e-10,
-    "noslip_iterations": 0,        # MuJoCo default (not midpoint = 30!)
-    "noslip_tolerance": 1e-6,      # MuJoCo default (not midpoint = 3e-5!)
-    "margin": 0.0,                 # MuJoCo default (not midpoint = 0.0025!)
-}
+# Warm-start from best of 20260219T142207_loose_fudge (11-ref, cost=0.003416)
+# NEW: Added default values for 3 new solver params (no tuned values yet)
+CMAES_X0: dict[str, float] | None = None  # Cold-start: search from space midpoint
 
 # ---------------------------------------------------------------------------
 # Cost-function constants
