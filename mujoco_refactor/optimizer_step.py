@@ -735,6 +735,12 @@ if __name__ == "__main__":
                         help="Results dir (or optimization_bests.csv) to warm-start from")
     parser.add_argument("--resume-from", type=str, default=None,
                         help="Results dir containing cmaes_state.pkl to resume from")
+    parser.add_argument("--pool-size", type=int, default=None,
+                        help="Override worker pool size (default: auto from cpu_count)")
+    parser.add_argument("--no-video", action="store_true",
+                        help="Skip video recording at the end (use for headless/batch runs)")
+    parser.add_argument("--run-dir", type=str, default=None,
+                        help="Override results directory (skips auto timestamp naming)")
     args = parser.parse_args()
 
     # Resume: load full CMA-ES state
@@ -822,12 +828,15 @@ if __name__ == "__main__":
         )
 
     # Create run directory and save config snapshots
-    run_tag = datetime.now().strftime("%Y%m%dT%H%M%S")
-    if args.suffix:
-        run_tag += f"_{args.suffix}"
+    if args.run_dir:
+        run_dir_results = pathlib.Path(args.run_dir)
     else:
-        run_tag += "_step"
-    run_dir_results = pathlib.Path("results") / run_tag
+        run_tag = datetime.now().strftime("%Y%m%dT%H%M%S")
+        if args.suffix:
+            run_tag += f"_{args.suffix}"
+        else:
+            run_tag += "_step"
+        run_dir_results = pathlib.Path("results") / run_tag
     run_dir_results.mkdir(parents=True, exist_ok=True)
     shutil.copy2(pathlib.Path(__file__).parent / "config_step_new.py", run_dir_results / "config_step_new.py")
     shutil.copy2(pathlib.Path(__file__).parent / "config_new.py", run_dir_results / "config_new.py")
@@ -853,7 +862,7 @@ if __name__ == "__main__":
     try:
         n_trials = max(1, INIT_JITTER_TRIALS)
         tasks_per_batch = BATCH_SIZE * len(_REF_ROWS) * n_trials
-        pool_size = max(1, min(os.cpu_count() or 16, tasks_per_batch))
+        pool_size = args.pool_size if args.pool_size else max(1, min(os.cpu_count() or 16, tasks_per_batch))
         print(f"Worker pool size: {pool_size} (tasks per batch: {tasks_per_batch})")
         pool = multiprocessing.Pool(processes=pool_size)
         result = _run_batch_optimization(all_results, pool, es_resume=es_resume)
@@ -878,6 +887,11 @@ if __name__ == "__main__":
     print(f"  solimp_dmax: {dmax:.6f}  (derived)")
 
     # Record top 1 rollout
+    if args.no_video:
+        print("\n--- Skipping video recording (--no-video) ---")
+        print(f"\n  Results saved to {run_dir_results}/")
+        sys.exit(0)
+
     print("\n--- Recording Best Rollout ---")
     import importlib
     sim_module = importlib.import_module(SIM_MODULE)

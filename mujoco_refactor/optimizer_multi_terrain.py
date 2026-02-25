@@ -963,6 +963,12 @@ if __name__ == "__main__":
                         help="Results dir (or optimization_bests.csv) to warm-start from")
     parser.add_argument("--resume-from", type=str, default=None,
                         help="Results dir containing cmaes_state.pkl to resume from")
+    parser.add_argument("--terrain", nargs="+", default=None,
+                        help="Only optimize for these terrain types (flat, step)")
+    parser.add_argument("--pool-size", type=int, default=None,
+                        help="Override worker pool size (default: os.cpu_count())")
+    parser.add_argument("--run-dir", type=str, default=None,
+                        help="Override results directory (skips auto timestamp naming)")
     args = parser.parse_args()
 
     # Resume: load full CMA-ES state
@@ -1012,10 +1018,12 @@ if __name__ == "__main__":
         _REF_ROWS = [r for r in _REF_ROWS if r["scene"] in args.scenes]
     if args.freqs:
         _REF_ROWS = [r for r in _REF_ROWS if r["ctrl_freq"] in args.freqs]
-    if args.scenes or args.freqs:
+    if args.terrain:
+        _REF_ROWS = [r for r in _REF_ROWS if r["terrain"] in args.terrain]
+    if args.scenes or args.freqs or args.terrain:
         _REF_INDEX_BY_ID = {row["id"]: i for i, row in enumerate(_REF_ROWS)}
         if not _REF_ROWS:
-            print(f"ERROR: no reference rows match scenes={args.scenes} freqs={args.freqs}")
+            print(f"ERROR: no reference rows match scenes={args.scenes} freqs={args.freqs} terrain={args.terrain}")
             sys.exit(1)
         print(f"Filtered to {len(_REF_ROWS)} refs: {[r['id'] for r in _REF_ROWS]}")
 
@@ -1033,7 +1041,6 @@ if __name__ == "__main__":
     for scene, base_xml in MJCF_PATHS.items():
         # Flat terrain: use original XML
         MJCF_FLAT_PATHS[scene] = base_xml
-        print(f"  {scene} (flat): {base_xml}")
 
         # Step terrain: generate step XML
         src_dir = pathlib.Path(base_xml).parent
@@ -1041,7 +1048,6 @@ if __name__ == "__main__":
         out_xml = str(src_dir / f"{stem}_{step_tag}.xml")
         _inject_steps(base_xml, STEP_PRESET, out_xml)
         MJCF_STEP_PATHS[scene] = out_xml
-        print(f"  {scene} (step): {out_xml}")
 
     print(f"\nRunning multi-terrain optimization for {N_CALLS} evaluations in batches of {BATCH_SIZE}...")
     print(f"Cost hierarchy: flat_weight={FLAT_TERRAIN_WEIGHT}, step_weight={STEP_TERRAIN_WEIGHT}")
@@ -1056,9 +1062,12 @@ if __name__ == "__main__":
         )
 
     # Create run directory and save config snapshots
-    timestamp = datetime.now().strftime("%Y%m%dT%H%M%S")
-    suffix = f"_{args.suffix}" if args.suffix else ""
-    run_dir = pathlib.Path("results") / f"{timestamp}_multi_terrain{suffix}"
+    if args.run_dir:
+        run_dir = pathlib.Path(args.run_dir)
+    else:
+        timestamp = datetime.now().strftime("%Y%m%dT%H%M%S")
+        suffix = f"_{args.suffix}" if args.suffix else ""
+        run_dir = pathlib.Path("results") / f"{timestamp}_multi_terrain{suffix}"
     run_dir.mkdir(parents=True, exist_ok=True)
     print(f"\nResults directory: {run_dir}")
 
@@ -1073,7 +1082,7 @@ if __name__ == "__main__":
         w.writeheader()
 
     # Run optimization with multiprocessing
-    with multiprocessing.Pool(processes=os.cpu_count()) as pool:
+    with multiprocessing.Pool(processes=args.pool_size or os.cpu_count()) as pool:
         all_results = []
         result = _run_batch_optimization(all_results, pool, run_dir, es_resume=es_resume)
 
@@ -1084,3 +1093,27 @@ if __name__ == "__main__":
     print(f"Results saved to: {run_dir}")
     print(f"  - {CSV_PATH}")
     print(f"  - {BEST_CSV_PATH}")
+
+    # Record best rollout for each ref
+    print("\n--- Recording Best Rollout ---")
+    import importlib as _importlib
+    _sim_rec = _importlib.import_module(SIM_MODULE)
+    best_result = min(all_results, key=lambda r: r["cost"])
+    best_sim_params = sim_params_from_point(
+        [best_result["params"][dim.name] for dim in space]
+    )
+    for ref_row in _REF_ROWS:
+            scene = ref_row["scene"]
+            terrain = ref_row["terrain"]
+            ref_id = ref_row["id"]
+            mjcf_path = MJCF_FLAT_PATHS[scene] if terrain == "flat" else MJCF_STEP_PATHS[scene]
+            video_path = run_dir / f"best_{ref_id}.mp4"
+            sim_params_rec = dict(best_sim_params)
+            sim_params_rec["drive_freq"] = ref_row.get("ctrl_freq", DEFAULT_CTRL_FREQ)
+            print(f"  Recording {ref_id} → {video_path.name}")
+            _sim_rec.run_simulation(
+                sim_params_rec,
+                mjcf_path=mjcf_path,
+                sim_duration=SIM_DURATION,
+                record_path=str(video_path),
+            )

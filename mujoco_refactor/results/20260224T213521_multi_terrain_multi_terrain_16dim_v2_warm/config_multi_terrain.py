@@ -50,8 +50,8 @@ from config_new import (
 SIM_DURATION = 3.0  # Same as flat terrain (faster evaluation)
 N_CALLS = 4800      # More budget for multi-terrain (2× single-terrain)
 BATCH_SIZE = 16
-INIT_YAW_JITTER_DEG = 3
-INIT_JITTER_TRIALS = 3
+INIT_YAW_JITTER_DEG = 2
+INIT_JITTER_TRIALS = 2
 INIT_JITTER_SEED = 12345
 VELOCITY_DEADZONE = False
 DEFAULT_CTRL_FREQ = 30.0
@@ -63,7 +63,7 @@ STEP_TERRAIN_WEIGHT = 1.0   # Weight for step terrain aggregate cost
 # Component weights (terrain-specific)
 # Flat terrain: higher lateral penalty, yaw enabled
 FLAT_VELOCITY_COST_WEIGHT = 5.0
-FLAT_TUMBLE_COST_WEIGHT = 3.0
+FLAT_TUMBLE_COST_WEIGHT = 1.0
 FLAT_LATERAL_COST_WEIGHT = 5.0
 FLAT_YAW_COST_WEIGHT = 1.0
 
@@ -83,7 +83,7 @@ COST_FAILURE = 1e6
 # CMA-ES
 CMAES_SIGMA0 = 0.5
 OPTIMIZER_RANDOM_STATE = 69420
-VERBOSE_BATCH = False
+VERBOSE_BATCH = True
 PROFILE_BATCH = True
 
 # CSV filenames (written into run_dir at runtime)

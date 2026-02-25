@@ -63,7 +63,7 @@ STEP_TERRAIN_WEIGHT = 1.0   # Weight for step terrain aggregate cost
 # Component weights (terrain-specific)
 # Flat terrain: higher lateral penalty, yaw enabled
 FLAT_VELOCITY_COST_WEIGHT = 5.0
-FLAT_TUMBLE_COST_WEIGHT = 3.0
+FLAT_TUMBLE_COST_WEIGHT = 1.0
 FLAT_LATERAL_COST_WEIGHT = 5.0
 FLAT_YAW_COST_WEIGHT = 1.0
 

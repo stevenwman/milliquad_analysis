@@ -49,8 +49,8 @@ from config_new import (
 SIM_DURATION = 5.0          # robot must traverse steps
 N_CALLS = 4800
 BATCH_SIZE = 16
-INIT_YAW_JITTER_DEG = 2
-INIT_JITTER_TRIALS = 2
+INIT_YAW_JITTER_DEG = 3
+INIT_JITTER_TRIALS = 3
 INIT_JITTER_SEED = 12345
 VELOCITY_DEADZONE = False
 DEFAULT_CTRL_FREQ = 30.0
@@ -74,7 +74,7 @@ FAILURE_MODE_VEL_SCALE = 0.05  # m/s
 # CMA-ES
 CMAES_SIGMA0 = 0.5          # larger than flat's 0.3 — step terrain needs more exploration
 OPTIMIZER_RANDOM_STATE = 69420
-VERBOSE_BATCH = True
+VERBOSE_BATCH = False
 PROFILE_BATCH = True
 
 # CSV filenames (written into run_dir at runtime)
