@@ -94,7 +94,7 @@ REFERENCE_DATA: list[dict[str, Any]] = [
 # ---------------------------------------------------------------------------
 # Optimization hyper-parameters
 # ---------------------------------------------------------------------------
-N_CALLS = 4800  # increased budget for 16-dim local refinement
+N_CALLS = 2400  # total optimization iterations (combined needs more budget than per-scene)
 SIM_DURATION = 3.0  # seconds per simulation run
 SIMULATION_TIMEOUT = 35  # wall-clock seconds per worker
 ROLLOUTS_PER_SCENE = 1  # sims per scene per iteration (>1 only for noisy sims)
@@ -125,29 +125,25 @@ OPTIMIZER_BACKEND = "cmaes"
 # CMAES_SIGMA0 = 0.3  # broad exploration
 # CMAES_SIGMA0 = 0.15  # tighter local search around lateral best
 # CMAES_SIGMA0 = 0.5  # wide exploration to escape stagnation
-CMAES_SIGMA0 = 0.15  # local refinement around 13-dim best (warm-start with MuJoCo defaults)
+CMAES_SIGMA0 = 0.3  # moderate exploration around loose_fudge best (warm-start)
 # CMA-ES warm-start: set to a {param_name: value} dict to start from a known good point
 # instead of the space midpoint.  None = start from midpoint (cold start).
 # Paste best params from optimization_bests.csv to warm-start the next run.
-# Warm-start from 13-dim best (20260222T181114_with_20hz_no-deadzone, cost=0.380)
-# 3 new solver params initialized at MuJoCo defaults (NOT space midpoints!)
+# Warm-start from best of 20260219T142207_loose_fudge (11-ref, cost=0.003416)
 CMAES_X0: dict[str, float] | None = {
-    "sliding_friction": 0.48734565718766704,
-    "torsional_friction": 0.00025167486271239974,
-    "rolling_friction": 4.115853923336379e-06,
-    "solref_timeconst": 0.002316749205053682,
-    "solref_dampratio": 3.3733148987037813,
-    "solimp_dmin": 0.45155836837876284,
-    "solimp_delta_d": 0.6302833354616117,
-    "solimp_width": 2.005399484434065e-05,
-    "solimp_midpoint": 0.2865197391827468,
-    "solimp_power": 5.231485448700575,
-    "magnetic_moment_fudge": 0.6532045074731974,
-    "magnetic_field_fudge": 1.0437234064669991,
-    "dof_damping": 4.989444645973366e-10,
-    "noslip_iterations": 0,        # MuJoCo default (not midpoint = 30!)
-    "noslip_tolerance": 1e-6,      # MuJoCo default (not midpoint = 3e-5!)
-    "margin": 0.0,                 # MuJoCo default (not midpoint = 0.0025!)
+    "sliding_friction": 0.4140049078093072,
+    "torsional_friction": 0.00011099873412552575,
+    "rolling_friction": 6.9067464310571144e-06,
+    "solref_timeconst": 0.003307130816944404,
+    "solref_dampratio": 2.3660845121986203,
+    "solimp_dmin": 0.2529932362050259,
+    "solimp_delta_d": 0.4412728465683524,
+    "solimp_width": 3.5064211337397975e-05,
+    "solimp_midpoint": 0.6593543907283892,
+    "solimp_power": 5.58776761785696,
+    "magnetic_moment_fudge": 0.6717734036831045,
+    "magnetic_field_fudge": 1.0901771884633669,
+    "dof_damping": 5.582403996483286e-10,
 }
 
 # ---------------------------------------------------------------------------
@@ -187,13 +183,11 @@ VELOCITY_DEADZONE = False  # True = zero cost inside 1-sigma band; False = plain
 # ]
 
 # ---------------------------------------------------------------------------
-# Search space — EXTENDED 16-param (2026-02-23)
+# Search space — tightened from per-morphology/per-frequency sweep (2026-02-18)
 # ---------------------------------------------------------------------------
-# Original 13 params tightened from per-morphology/per-frequency sweep (2026-02-18).
-# NEW: 3 additional MuJoCo solver params (noslip_iterations, noslip_tolerance, o_margin).
-# NOTE: o_solreffriction and o_solimpfriction don't exist in MuJoCo API.
+# Converged params narrowed; divergent params left wide.
+# See compare_morphology_params.py output for convergence analysis.
 space: list[Real] = [
-    # Original 13 dimensions (friction, contact solver, magnetic, damping)
     Real(0.01, 2.0, "log-uniform", name="sliding_friction"),  # per-scene consensus 0.05–0.36
     Real(1e-6, 10.0, "log-uniform", name="torsional_friction"),  # mixed — leave wide
     Real(1e-6, 1e-3, "log-uniform", name="rolling_friction"),  # condim=6: >1e-3 kills locomotion
@@ -207,11 +201,6 @@ space: list[Real] = [
     Real(0.5, 1.5, "uniform", name="magnetic_moment_fudge"),  # wide — let optimizer find it
     Real(0.5, 1.5, "uniform", name="magnetic_field_fudge"),  # wide — let optimizer find it
     Real(1e-10, 1e-8, "log-uniform", name="dof_damping"),  # per-scene consensus 5e-10 to 3e-9
-
-    # NEW: 3 friction solver parameters
-    Real(0, 60, "uniform", name="noslip_iterations"),  # int cast; 0=default; >60 causes instability
-    Real(1e-6, 1e-3, "log-uniform", name="noslip_tolerance"),  # convergence threshold
-    Real(0.0, 0.005, "uniform", name="margin"),  # contact detection distance → o_margin attribute
 ]
 
 # ---------------------------------------------------------------------------
@@ -292,17 +281,14 @@ def point_to_params(point: list[float]) -> dict[str, float]:
 
 
 def sim_params_from_point(point: list[float]) -> dict[str, Any]:
-    """Build the sim_params dict consumed by simulation_fast_new.run_simulation().
+    """Build the sim_params dict consumed by simulation.run_simulation().
 
     This is the *only* place that maps optimizer space → simulation parameters.
-    Now supports 16 dimensions (13 original + 3 new solver params).
     """
     params = point_to_params(point)
     m_mag = MAGNETIC_MOMENT * params["magnetic_moment_fudge"]
     kp_mag = m_mag * MAGNETIC_FIELD_MAGNITUDE * params["magnetic_field_fudge"]
-
-    # Original 13 parameters
-    base_params = {
+    return {
         "ground_friction": [
             params["sliding_friction"],
             params["torsional_friction"],
@@ -320,12 +306,3 @@ def sim_params_from_point(point: list[float]) -> dict[str, Any]:
         "kp_mag": kp_mag,
         "mag_params": {"m_mag": m_mag},
     }
-
-    # NEW: Add 3 solver parameters
-    base_params.update({
-        "noslip_iterations": int(round(params["noslip_iterations"])),
-        "noslip_tolerance": params["noslip_tolerance"],
-        "margin": params["margin"],  # Applied to model.opt.o_margin
-    })
-
-    return base_params
