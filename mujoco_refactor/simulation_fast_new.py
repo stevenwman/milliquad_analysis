@@ -26,7 +26,7 @@ import numpy as np
 import pathlib
 from scipy.spatial.transform import Rotation as R
 
-from config import (
+from config_new import (
     CAMERA_DISTANCE_RECORD,
     CAMERA_DISTANCE_VIEWER,
     INITIAL_LEG_ANGLES,

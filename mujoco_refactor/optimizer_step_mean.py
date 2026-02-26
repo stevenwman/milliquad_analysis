@@ -393,21 +393,21 @@ def _aggregate_scene_results(points: list, scene_results: list) -> list[dict]:
         for ref_id, trials in d["ref_trials_costs"].items():
             scene = d["ref_scene"][ref_id]
             weight = d["ref_weights"][ref_id]
-            best_idx = int(np.argmin(trials))
-            best_cost = float(trials[best_idx])
-            best_vel = float(d["ref_trials_velocities"][ref_id][best_idx])
-            best_tumble = float(d["ref_trials_tumble"][ref_id][best_idx])
-            best_lateral = float(d["ref_trials_lateral"][ref_id][best_idx])
-            best_yaw = float(d["ref_trials_yaw"][ref_id][best_idx])
-            best_progress = float(d["ref_trials_progress"][ref_id][best_idx])
+            # Mean aggregation across jitter trials
+            mean_cost = float(np.mean(trials))
+            mean_vel = float(np.mean(d["ref_trials_velocities"][ref_id]))
+            mean_tumble = float(np.mean(d["ref_trials_tumble"][ref_id]))
+            mean_lateral = float(np.mean(d["ref_trials_lateral"][ref_id]))
+            mean_yaw = float(np.mean(d["ref_trials_yaw"][ref_id]))
+            mean_progress = float(np.mean(d["ref_trials_progress"][ref_id]))
 
-            ref_costs[ref_id] = best_cost
-            ref_avg_velocities[ref_id] = best_vel
-            ref_tumble[ref_id] = best_tumble
-            ref_lateral[ref_id] = best_lateral
-            ref_yaw[ref_id] = best_yaw
-            ref_progress[ref_id] = best_progress
-            ref_best_trial[ref_id] = best_idx
+            ref_costs[ref_id] = mean_cost
+            ref_avg_velocities[ref_id] = mean_vel
+            ref_tumble[ref_id] = mean_tumble
+            ref_lateral[ref_id] = mean_lateral
+            ref_yaw[ref_id] = mean_yaw
+            ref_progress[ref_id] = mean_progress
+            ref_best_trial[ref_id] = -1  # N/A for mean aggregation
 
             d["scene_costs"][scene] += weight * best_cost
             d["scene_vel_num"][scene] += weight * best_vel

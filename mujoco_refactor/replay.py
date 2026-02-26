@@ -13,7 +13,7 @@ Usage:
 import csv
 import sys
 
-from config import (
+from config_new import (
     CSV_PATH,
     DEFAULT_CTRL_FREQ,
     MJCF_PATHS,

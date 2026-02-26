@@ -125,6 +125,14 @@ STEP_PRESET: dict[str, float | int] = {
 }
 
 STEP_START_X: float = STEP_PRESET["flat_lead"]
+STEP_END_X: float = (
+    STEP_PRESET["flat_lead"]
+    + (STEP_PRESET["step_count"] - 1) * STEP_PRESET["step_length"]
+    + STEP_PRESET["final_step_length"]
+)  # 0.1015m — trailing edge of final step platform
+
+# Progress penalty: penalizes incomplete step traversal
+PROGRESS_COST_WEIGHT = 2.0
 
 
 # ---------------------------------------------------------------------------
@@ -173,6 +181,7 @@ def csv_fieldnames() -> list[str]:
         + [f"lateral_{rid}" for rid in rids]
         + [f"tumble_{rid}" for rid in rids]
         + [f"yaw_{rid}" for rid in rids]
+        + [f"progress_{rid}" for rid in rids]
         + [f"best_trial_{rid}" for rid in rids]
         + param_names
     )

@@ -239,7 +239,7 @@ def _evaluate_one_scene(args):
     # Lazy import in subprocess (separate memory space)
     import importlib
     _sim = importlib.import_module(SIM_MODULE)
-    from config import sim_params_from_point as _sim_params_from_point
+    from config_new import sim_params_from_point as _sim_params_from_point
 
     sim_params = _sim_params_from_point(point)
     scene_name = ref_row["scene"]
@@ -920,7 +920,7 @@ if __name__ == "__main__":
         run_tag += f"_{args.suffix}"
     run_dir_results = pathlib.Path("results") / run_tag
     run_dir_results.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(pathlib.Path(__file__).parent / "config.py", run_dir_results / "config.py")
+    shutil.copy2(pathlib.Path(__file__).parent / "config_new.py", run_dir_results / "config_new.py")
     print(f"  Run directory: {run_dir_results}/")
 
     # Write CSVs directly into run directory

@@ -6,8 +6,10 @@ import sys
 from pathlib import Path
 import numpy as np
 
+import sys
+sys.path.insert(0, "archive/legacy")
 from config import sim_params_from_point
-from config_step import STEP_START_X, REFERENCE_DATA
+from config_step_13dim import STEP_START_X, REFERENCE_DATA
 from simulation_fast import run_simulation
 
 # Step terrain suffix

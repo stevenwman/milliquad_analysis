@@ -16,7 +16,7 @@ import sys
 import numpy as np
 
 # Use the saved config from the run directory (validates consistency)
-from config import (
+from config_new import (
     BATCH_SIZE,
     CMAES_SIGMA0,
     CMAES_X0,

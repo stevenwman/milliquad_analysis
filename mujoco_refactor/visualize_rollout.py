@@ -14,7 +14,7 @@ import csv
 import mujoco
 import numpy as np
 
-from config import (
+from config_new import (
     CSV_PATH,
     MAGNETIC_FIELD_MAGNITUDE,
     MAGNETIC_MOMENT,
