@@ -409,10 +409,10 @@ def _aggregate_scene_results(points: list, scene_results: list) -> list[dict]:
             ref_progress[ref_id] = mean_progress
             ref_best_trial[ref_id] = -1  # N/A for mean aggregation
 
-            d["scene_costs"][scene] += weight * best_cost
-            d["scene_vel_num"][scene] += weight * best_vel
-            d["scene_tumble_num"][scene] += weight * best_tumble
-            d["scene_lateral_num"][scene] += weight * best_lateral
+            d["scene_costs"][scene] += weight * mean_cost
+            d["scene_vel_num"][scene] += weight * mean_vel
+            d["scene_tumble_num"][scene] += weight * mean_tumble
+            d["scene_lateral_num"][scene] += weight * mean_lateral
             d["scene_weight"][scene] += weight
 
         scene_avg_velocities = {
