@@ -330,6 +330,7 @@ def _record_state(trajectory: list[dict], data, step_cache: dict | None = None) 
         "joint_pos": data.qpos[7:11].copy(),
         "joint_vel": data.qvel[6:10].copy(),
         "leg_xquat": data.xquat[_LEG_BODY_SLICE].copy(),  # [4, 4] per-leg body world quats
+        "leg_xpos": data.xpos[_LEG_BODY_SLICE].copy(),  # [4, 3] per-leg body world pos
     }
     if step_cache is not None:
         if "tau_ext" in step_cache:
