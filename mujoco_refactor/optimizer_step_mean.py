@@ -171,11 +171,22 @@ def calculate_cost(
     if enter_state is None:
         return fail
 
+    # Find exit state: last state within 90% of step region (avoids cliff-edge artifacts)
     final_state = trajectory[-1]
-    active_duration = final_state["time"] - enter_state["time"]
+    if step_end_x > 0:
+        active_cutoff = step_start_x + 0.9 * (step_end_x - step_start_x)
+        exit_state = enter_state
+        for state in trajectory:
+            if state["pos"][0] > active_cutoff:
+                break
+            exit_state = state
+    else:
+        exit_state = final_state
+
+    active_duration = exit_state["time"] - enter_state["time"]
     avg_forward_velocity = 0.0
     if active_duration > 1e-6:
-        forward_displacement = final_state["pos"][0] - enter_state["pos"][0]
+        forward_displacement = exit_state["pos"][0] - enter_state["pos"][0]
         avg_forward_velocity = forward_displacement / active_duration
 
     # Velocity error
@@ -194,23 +205,27 @@ def calculate_cost(
         # moving at FAILURE_MODE_VEL_SCALE produces cost=1.0
         velocity_error = (avg_forward_velocity / FAILURE_MODE_VEL_SCALE) ** 2
 
-    # Lateral displacement (from step entry to end)
-    lateral_displacement = abs(final_state["pos"][1] - enter_state["pos"][1])
+    # Lateral displacement (within active step region only)
+    lateral_displacement = abs(exit_state["pos"][1] - enter_state["pos"][1])
     lateral_error = lateral_displacement ** 2
 
-    # Tumble penalty (over entire trajectory, normalized per-step)
+    # Tumble penalty (within 90% of step region — ignores cliff-fall at end)
     tumble_penalty = 0.0
+    tumble_count = 0
     for state in trajectory:
+        if step_end_x > 0 and state["pos"][0] > active_cutoff:
+            break
         quat = state["quat"]
         body_z_axis = R.from_quat(quat, scalar_first=True).apply(_BODY_Z_LOCAL)
         uprightness = np.dot(body_z_axis, _NOMINAL_BODY_Z_WORLD)
         if uprightness < TUMBLE_THRESHOLD:
             tumble_penalty += (1 - uprightness) * TUMBLE_PENALTY_SCALE
-    tumble_penalty /= max(len(trajectory), 1)
+        tumble_count += 1
+    tumble_penalty /= max(tumble_count, 1)
 
-    # Yaw spin-out (from step entry to end)
+    # Yaw spin-out (within active step region only)
     start_body_x = R.from_quat(enter_state["quat"], scalar_first=True).apply(_BODY_X_LOCAL)
-    end_body_x = R.from_quat(final_state["quat"], scalar_first=True).apply(_BODY_X_LOCAL)
+    end_body_x = R.from_quat(exit_state["quat"], scalar_first=True).apply(_BODY_X_LOCAL)
     start_heading = start_body_x[:2]
     end_heading = end_body_x[:2]
     start_norm = np.linalg.norm(start_heading)
