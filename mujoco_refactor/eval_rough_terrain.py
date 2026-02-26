@@ -38,9 +38,13 @@ PARAM_NAMES = [dim.name for dim in space]
 
 _ORIGINAL_INIT_POSE = sim_module._initialize_pose
 
+# Module-level Y offset, set per-trial before calling run_simulation
+_y_offset: float = 0.0
+
 def _raised_init_pose(data, init_yaw_jitter_deg=0.0, rng=None):
     _ORIGINAL_INIT_POSE(data, init_yaw_jitter_deg=init_yaw_jitter_deg, rng=rng)
     data.qpos[0] += 0.03  # 3cm forward
+    data.qpos[1] += _y_offset
     data.qpos[2] += 0.01  # 1cm up
 
 sim_module._initialize_pose = _raised_init_pose
@@ -59,8 +63,8 @@ TERRAIN_Z_SAFE = 0.00025
 TERRAIN_SEED = 42
 
 N_TILES = 3              # how many copies to tile along +X
-FLAT_LEAD = 0.02         # 20mm flat ground before terrain starts
-PIXELS_PER_SQUARE = 20   # upsampling for blocky appearance
+FLAT_LEAD = 0.025        # 25mm flat ground before terrain starts
+PIXELS_PER_SQUARE = 8    # 8x8 pixels per logical tile (20 caused arena overflow, 1 oversmooths)
 
 DEFAULT_FREQS = [10.0, 20.0, 30.0]
 
@@ -129,11 +133,6 @@ def inject_tiled_rough(xml_path: str, tmp_dir: str) -> str:
     tree = ET.parse(xml_path)
     root = tree.getroot()
     worldbody = root.find("worldbody")
-
-    # Remove floor geom to avoid contact interference
-    for geom in worldbody.findall("geom"):
-        if geom.get("name") == "floor":
-            worldbody.remove(geom)
 
     asset = root.find("asset")
     if asset is None:
