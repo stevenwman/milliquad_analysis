@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 
 from config import sim_params_from_point
-from config_step import STEP_START_X, REFERENCE_DATA
+from config_step_13dim import STEP_START_X, REFERENCE_DATA
 from simulation_fast import run_simulation
 
 # Step terrain XML suffix

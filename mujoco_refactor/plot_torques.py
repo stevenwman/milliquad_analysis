@@ -15,7 +15,7 @@ import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-from config import (
+from config_new import (
     DEFAULT_CTRL_FREQ,
     MJCF_PATHS,
     SETTLE_TIME,

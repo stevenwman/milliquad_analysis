@@ -19,7 +19,7 @@ import time
 
 import numpy as np
 
-from config import (
+from config_new import (
     DEFAULT_CTRL_FREQ,
     INIT_JITTER_SEED,
     INIT_JITTER_TRIALS,

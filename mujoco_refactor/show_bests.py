@@ -5,7 +5,7 @@ import csv
 import math
 import pathlib
 import sys
-from config import reference_rows, space
+from config_new import reference_rows, space
 
 ref_rows = reference_rows()
 ref_ids = [r["id"] for r in ref_rows]

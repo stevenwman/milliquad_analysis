@@ -24,7 +24,7 @@ import xml.etree.ElementTree as ET
 
 import numpy as np
 
-from config import (
+from config_new import (
     DEFAULT_CTRL_FREQ,
     MJCF_PATHS,
     SETTLE_TIME,
