@@ -146,11 +146,11 @@ def _inject_rough_terrain(xml_path: str, out_xml: str) -> str:
     worldbody = root.find("worldbody")
 
     # Noslip solver allocates dense nefc×nefc matrix in arena.
-    # Worst case: nefc=1320 → 1320²×8 = 14MB. 32M gives safe headroom.
+    # nefc=2010 → 2010²×8 = 32MB. 128M handles up to nefc≈4000.
     size_elem = root.find("size")
     if size_elem is None:
         size_elem = ET.SubElement(root, "size")
-    size_elem.set("memory", "32M")
+    size_elem.set("memory", "128M")
 
     asset = root.find("asset")
     if asset is None:
@@ -323,16 +323,22 @@ def _evaluate_one_scene(args):
     spawn_offset = (_SPAWN_X, y_offset, _SPAWN_Z_RAISE)
 
     t0 = time.perf_counter()
-    trajectory = _sim.run_simulation(
-        sim_params,
-        mjcf_path=mjcf_path,
-        sim_duration=SIM_DURATION,
-        visualize=False,
-        progress=show_progress,
-        wall_timeout=SIMULATION_TIMEOUT,
-        spawn_offset=spawn_offset,
-        ignore_stuck_detection=True,
-    )
+    try:
+        trajectory = _sim.run_simulation(
+            sim_params,
+            mjcf_path=mjcf_path,
+            sim_duration=SIM_DURATION,
+            visualize=False,
+            progress=show_progress,
+            wall_timeout=SIMULATION_TIMEOUT,
+            spawn_offset=spawn_offset,
+            ignore_stuck_detection=True,
+        )
+    except Exception as e:
+        # MuJoCo FatalError (arena overflow, etc.) — treat as failed sim
+        print(f"  [WARN] Sim crashed ({ref_row['id']} trial {trial_index}): {e}", flush=True)
+        trajectory = None
+
     if trajectory is None:
         cost_data = {
             "total_cost": COST_FAILURE,
