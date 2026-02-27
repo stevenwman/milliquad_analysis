@@ -43,7 +43,7 @@ _y_offset: float = 0.0
 
 def _raised_init_pose(data, init_yaw_jitter_deg=0.0, rng=None):
     _ORIGINAL_INIT_POSE(data, init_yaw_jitter_deg=init_yaw_jitter_deg, rng=rng)
-    data.qpos[0] += 0.03  # 3cm forward
+    data.qpos[0] += 0.05  # 5cm forward (well onto hfield)
     data.qpos[1] += _y_offset
     data.qpos[2] += 0.01  # 1cm up
 
@@ -152,6 +152,33 @@ def inject_tiled_rough(xml_path: str, tmp_dir: str) -> str:
     geom.set("hfield", "rough_terrain")
     geom.set("pos", f"{pos_x} 0.0 0.0")
     geom.set("rgba", "0.6 0.55 0.5 1")
+
+    # Add transparent walls along Y edges to keep robot on the hfield
+    wall_height = 0.01  # 10mm tall
+    wall_thick = 0.001  # 1mm thick
+    wall_x = pos_x      # centered same as terrain
+    wall_hx = x_half    # same length as terrain
+    for side, y_sign in [("left", 1), ("right", -1)]:
+        wall_y = y_sign * (y_half + wall_thick)
+        wall = ET.SubElement(worldbody, "geom")
+        wall.set("name", f"wall_{side}")
+        wall.set("type", "box")
+        wall.set("size", f"{wall_hx} {wall_thick} {wall_height}")
+        wall.set("pos", f"{wall_x} {wall_y} {wall_height}")
+        wall.set("rgba", "0.7 0.8 1.0 0.3")
+        wall.set("contype", "1")
+        wall.set("conaffinity", "1")
+
+    # Back wall to prevent robot escaping behind the terrain
+    back_x = FLAT_LEAD  # at terrain start edge
+    back_wall = ET.SubElement(worldbody, "geom")
+    back_wall.set("name", "wall_back")
+    back_wall.set("type", "box")
+    back_wall.set("size", f"{wall_thick} {y_half + 2 * wall_thick} {wall_height}")
+    back_wall.set("pos", f"{back_x} 0.0 {wall_height}")
+    back_wall.set("rgba", "0.7 0.8 1.0 0.3")
+    back_wall.set("contype", "1")
+    back_wall.set("conaffinity", "1")
 
     # Write alongside original for correct relative path resolution
     src_dir = pathlib.Path(xml_path).parent
