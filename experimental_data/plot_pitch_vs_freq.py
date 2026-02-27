@@ -1,12 +1,17 @@
-"""Plot experimental pitch amplitude vs frequency for flat terrain.
+"""Plot experimental pitch amplitude vs frequency for flat and step terrains.
 
 Pitch amplitude = RMS of detrended body angle (θ - mean(θ)) in steady state.
 Same trial selection and trimming as velocity analysis.
+  - Flat: per-condition time window (points, steady_t) or last-50% (20Hz)
+  - Step: q75 ± 150 sample window (matches velocity analysis)
 """
 
 import sys
 from pathlib import Path
 
+import matplotlib
+matplotlib.rcParams["font.family"] = "TeX Gyre Pagella"
+matplotlib.rcParams["font.size"] = 14
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -78,6 +83,21 @@ def _flat_pitch_rms_last50(csv_name: str) -> float:
     return float(np.std(theta_ss))
 
 
+def _step_pitch_rms(csv_name: str) -> float:
+    """RMS pitch amplitude using 50%–90% of recording (skip transient + cliff-fall)."""
+    dat = _load(csv_name)
+    theta_col = _body_theta_col(csv_name)
+    theta = dat[:, theta_col]
+    n = len(theta)
+    lo = n // 2
+    hi = int(0.9 * n)
+    theta_ss = theta[lo:hi]
+    theta_ss = theta_ss[~np.isnan(theta_ss)]
+    if len(theta_ss) < 10:
+        return 0.0
+    return float(np.std(theta_ss))
+
+
 # ── Condition definitions (same as velocity) ──
 # fmt: off
 FLAT_CONDITIONS = [
@@ -101,10 +121,23 @@ FLAT_20HZ = [
     (20, "4leg",  ["f204leg1-1.csv","f204leg2-2.csv","f204leg3-3.csv"], [1,2,3]),
     (20, "wheel", ["f20w1-1.csv","f20w2-2.csv","f20w3-3.csv"], [1,2,3]),
 ]
+
+STEP_CONDITIONS = [
+    (10, "leg",   ["s10leg1-1.csv","s10leg2-2.csv","s10leg3-3.csv"], [1,2,3]),
+    (10, "2leg",  ["s102leg1-1.csv","s102leg2-2.csv","s102leg3-3.csv"], [1,2,3]),
+    (10, "4leg",  ["s104leg1-1.csv","s104leg2-2.csv","s104leg3-3.csv"], [1,2,3]),
+    (20, "leg",   ["s20leg1-1.csv","s20leg2-2.csv","s20leg3-3.csv"], [1,2,3]),
+    (20, "2leg",  ["s202leg1-1.csv","s202leg2-2.csv","s202leg3-3.csv"], [1,2,3]),
+    (20, "4leg",  ["s204leg1-1.csv","s204leg2-2.csv","s204leg3-3.csv"], [1,2,3]),
+    (30, "leg",   ["s30leg1-1.csv","s30leg2-2.csv","s30leg3-3.csv"], [1,2,3]),
+    (30, "2leg",  ["s302leg1-1.csv","s302leg2-2.csv","s302leg3-3.csv"], [1,2,3]),
+    (30, "4leg",  ["s304leg1-1.csv","s304leg2-2.csv","s304leg3-3.csv"], [1,2,3]),
+    (30, "wheel", ["s30w1-1.csv","s30w2-2.csv","s30w3-3.csv"], [1,2,3]),
+]
 # fmt: on
 
-COLORS = {"leg": "#1f77b4", "2leg": "#ff7f0e", "4leg": "#2ca02c", "wheel": "#d62728"}
-LABELS = {"leg": "1-leg", "2leg": "2-leg", "4leg": "4-leg", "wheel": "wheel"}
+COLORS = {"leg": "#1E88E5", "2leg": "#FFC107", "4leg": "#007561", "wheel": "#D81B60"}
+LABELS = {"leg": "L1", "2leg": "L2", "4leg": "L4", "wheel": "WR"}
 
 
 # ── Extract per-trial pitch amplitudes ──
@@ -140,39 +173,86 @@ def extract_flat_pitch():
     return data
 
 
-# ── Plot ──
+def extract_step_pitch():
+    data = {m: {"freqs": [], "trials": [], "mean_freqs": [], "means": [], "stds": []} for m in COLORS}
 
-pitch_data = extract_flat_pitch()
+    for freq, morph, files, idx in STEP_CONDITIONS:
+        trial_files = [files[i - 1] for i in idx]
+        vals = [_step_pitch_rms(f) for f in trial_files]
+        data[morph]["freqs"].extend([freq] * len(vals))
+        data[morph]["trials"].extend(vals)
+        data[morph]["mean_freqs"].append(freq)
+        data[morph]["means"].append(np.mean(vals))
+        data[morph]["stds"].append(np.std(vals, ddof=1) if len(vals) > 1 else 0.0)
 
-# Print summary table
-print(f"{'Morph':<8} {'Freq':<6} {'Mean (°)':<10} {'Std (°)':<10} {'N':>3}")
-print("-" * 40)
-for morph in ("leg", "2leg", "4leg", "wheel"):
-    d = pitch_data[morph]
-    for i, freq in enumerate(d["mean_freqs"]):
-        n = sum(1 for f in d["freqs"] if f == freq)
-        print(f"{morph:<8} {freq:<6.0f} {d['means'][i]:<10.2f} {d['stds'][i]:<10.2f} {n:>3}")
+    return data
 
-fig, ax = plt.subplots(figsize=(7, 5))
-for morph in ("leg", "2leg", "4leg", "wheel"):
-    d = pitch_data[morph]
-    if not d["mean_freqs"]:
-        continue
-    freqs_scatter = np.array(d["freqs"], dtype=float)
-    mean = np.array(d["means"])
-    std = np.array(d["stds"])
-    freq_arr = np.array(d["mean_freqs"])
-    ax.fill_between(freq_arr, mean - std, mean + std, color=COLORS[morph], alpha=0.2, label=LABELS[morph])
-    ax.scatter(freqs_scatter, d["trials"], color=COLORS[morph], alpha=0.6, s=30, zorder=3)
 
-ax.set_xlabel("Frequency (Hz)")
-ax.set_ylabel("Pitch Amplitude RMS (°)")
-ax.set_title("Flat Terrain: Pitch Amplitude vs Frequency")
-ax.legend()
-ax.grid(True, alpha=0.3)
-ax.set_xticks([10, 20, 30, 50])
-ax.set_xlim(5, 55)
-fig.tight_layout()
-fig.savefig("experimental_data/plots/pitch_vs_freq_flat.png", dpi=150)
+# ── Plotting ──
+
+def plot_pitch(ax, data, title):
+    for morph in ("leg", "2leg", "4leg", "wheel"):
+        d = data[morph]
+        if not d["mean_freqs"]:
+            continue
+        freqs_scatter = np.array(d["freqs"], dtype=float)
+        mean = np.array(d["means"])
+        std = np.array(d["stds"])
+        freq_arr = np.array(d["mean_freqs"])
+        ax.fill_between(freq_arr, mean - std, mean + std, color=COLORS[morph], alpha=0.2, label=LABELS[morph])
+        ax.scatter(freqs_scatter, d["trials"], color=COLORS[morph], alpha=0.6, s=30, zorder=3)
+    ax.set_xlabel("Frequency (Hz)")
+    ax.set_ylabel("Pitch Amplitude RMS (\u00b0)")
+    ax.set_title(title)
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+
+
+# ── Main ──
+
+flat_pitch = extract_flat_pitch()
+step_pitch = extract_step_pitch()
+
+# Print summary tables
+for terrain, pdata in [("FLAT", flat_pitch), ("STEP", step_pitch)]:
+    print(f"\n{terrain}:")
+    deg = "\u00b0"
+    print(f"{'Morph':<8} {'Freq':<6} {f'Mean ({deg})':<10} {f'Std ({deg})':<10} {'N':>3}")
+    print("-" * 40)
+    for morph in ("leg", "2leg", "4leg", "wheel"):
+        d = pdata[morph]
+        for i, freq in enumerate(d["mean_freqs"]):
+            n = sum(1 for f in d["freqs"] if f == freq)
+            print(f"{morph:<8} {freq:<6.0f} {d['means'][i]:<10.2f} {d['stds'][i]:<10.2f} {n:>3}")
+
+# ── Individual flat plot (keep existing output) ──
+fig_flat, ax_flat = plt.subplots(figsize=(7, 5))
+plot_pitch(ax_flat, flat_pitch, "Flat Terrain: Pitch Amplitude vs Frequency")
+ax_flat.set_xticks([10, 20, 30, 50])
+ax_flat.set_xlim(5, 55)
+fig_flat.tight_layout()
+fig_flat.savefig("experimental_data/plots/pitch_vs_freq_flat.png", dpi=150)
+
+# ── Combined vertical stack: flat + step ──
+fig_both, (ax_top, ax_bot) = plt.subplots(2, 1, figsize=(7, 7.2))
+
+plot_pitch(ax_top, flat_pitch, "Flat Terrain")
+ax_top.set_xticks([10, 20, 30, 50])
+ax_top.set_xlim(7, 53)
+
+plot_pitch(ax_bot, step_pitch, "Step Terrain")
+ax_bot.set_xticks([10, 20, 30])
+ax_bot.set_xlim(7, 33)
+
+# Single legend on top panel
+handles, labels = ax_top.get_legend_handles_labels()
+ax_top.get_legend().remove()
+ax_bot.get_legend().remove()
+ax_top.legend(handles, labels, loc="upper left", fontsize=12, framealpha=0.9)
+
+fig_both.tight_layout()
+fig_both.savefig("experimental_data/plots/pitch_flat_vs_step.png", dpi=150, bbox_inches="tight")
+
 print(f"\nSaved: experimental_data/plots/pitch_vs_freq_flat.png")
+print(f"Saved: experimental_data/plots/pitch_flat_vs_step.png")
 plt.show()

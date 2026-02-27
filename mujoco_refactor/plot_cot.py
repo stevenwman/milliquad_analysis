@@ -17,6 +17,9 @@ import argparse
 import csv
 from pathlib import Path
 
+import matplotlib
+matplotlib.rcParams["font.family"] = "TeX Gyre Pagella"
+matplotlib.rcParams["font.size"] = 14
 import matplotlib.pyplot as plt
 import numpy as np
 
