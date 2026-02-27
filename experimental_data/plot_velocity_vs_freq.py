@@ -6,6 +6,9 @@ Individual trial points shown as scatter; lines through per-condition means.
 import sys
 from pathlib import Path
 
+import matplotlib
+matplotlib.rcParams["font.family"] = "TeX Gyre Pagella"
+matplotlib.rcParams["font.size"] = 14
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -90,8 +93,8 @@ STEP_CONDITIONS = [
 ]
 # fmt: on
 
-COLORS = {"leg": "#1f77b4", "2leg": "#ff7f0e", "4leg": "#2ca02c", "wheel": "#d62728"}
-LABELS = {"leg": "1-leg", "2leg": "2-leg", "4leg": "4-leg", "wheel": "wheel"}
+COLORS = {"leg": "#1E88E5", "2leg": "#FFC107", "4leg": "#007561", "wheel": "#D81B60"}
+LABELS = {"leg": "L1", "2leg": "L2", "4leg": "L4", "wheel": "WR"}
 JITTER = {"leg": 0, "2leg": 0, "4leg": 0, "wheel": 0}
 
 
@@ -233,7 +236,45 @@ ax_step.set_xlim(5, 35)
 fig_step.tight_layout()
 fig_step.savefig("experimental_data/plots/velocity_vs_freq_step.png", dpi=150)
 
+# ── Combined side-by-side: flat (clean) + step ──
+flat_side = extract_flat()
+# Remove 50Hz wheel scatter, add failure mode
+wf2 = flat_side["wheel"]
+wf2["means"].pop(); wf2["mean_freqs"].pop(); wf2["stds"].pop()
+keep2 = [i for i, f in enumerate(wf2["freqs"]) if f != 50]
+wf2["freqs"] = [wf2["freqs"][i] for i in keep2]
+wf2["trials"] = [wf2["trials"][i] for i in keep2]
+wf2["mean_freqs"].append(50); wf2["means"].append(0.0); wf2["stds"].append(0.0)
+
+step_side = extract_step()
+step_side["wheel"]["mean_freqs"] = [10, 20] + step_side["wheel"]["mean_freqs"]
+step_side["wheel"]["means"] = [0.0, 0.0] + step_side["wheel"]["means"]
+step_side["wheel"]["stds"] = [0.0, 0.0] + step_side["wheel"]["stds"]
+
+fig_both, (ax_top, ax_bot) = plt.subplots(2, 1, figsize=(7, 7.2))
+
+plot_terrain(ax_top, flat_side, "Flat Terrain")
+ax_top.plot(50, 0, "x", color=COLORS["wheel"], markersize=10, markeredgewidth=2.5, zorder=5)
+ax_top.set_xticks([10, 20, 30, 50])
+ax_top.set_xlim(7, 53)
+
+plot_terrain(ax_bot, step_side, "Step Terrain")
+ax_bot.plot(10, 0, "x", color=COLORS["wheel"], markersize=10, markeredgewidth=2.5, zorder=5)
+ax_bot.plot(20, 0, "x", color=COLORS["wheel"], markersize=10, markeredgewidth=2.5, zorder=5)
+ax_bot.set_xticks([10, 20, 30])
+ax_bot.set_xlim(7, 33)
+
+# Single legend on top panel
+handles, labels = ax_top.get_legend_handles_labels()
+ax_top.get_legend().remove()
+ax_bot.get_legend().remove()
+ax_top.legend(handles, labels, loc="upper left", fontsize=12, framealpha=0.9)
+
+fig_both.tight_layout()
+fig_both.savefig("experimental_data/plots/velocity_flat_vs_step.png", dpi=150, bbox_inches="tight")
+
 print("Saved: experimental_data/plots/velocity_vs_freq_flat.png")
 print("Saved: experimental_data/plots/velocity_vs_freq_flat_clean.png")
 print("Saved: experimental_data/plots/velocity_vs_freq_step.png")
+print("Saved: experimental_data/plots/velocity_flat_vs_step.png")
 plt.show()
