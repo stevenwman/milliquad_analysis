@@ -145,11 +145,12 @@ def _inject_rough_terrain(xml_path: str, out_xml: str) -> str:
     root = tree.getroot()
     worldbody = root.find("worldbody")
 
-    # Increase memory for heightfield contacts (default 66KB too small)
+    # Noslip solver allocates dense nefc×nefc matrix in arena.
+    # Worst case: nefc=1320 → 1320²×8 = 14MB. 32M gives safe headroom.
     size_elem = root.find("size")
     if size_elem is None:
         size_elem = ET.SubElement(root, "size")
-    size_elem.set("memory", "2M")
+    size_elem.set("memory", "32M")
 
     asset = root.find("asset")
     if asset is None:
