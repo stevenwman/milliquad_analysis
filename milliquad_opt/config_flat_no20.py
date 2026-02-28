@@ -1,7 +1,6 @@
-"""Rough terrain optimization config.
+"""Flat terrain optimization config — NO 20Hz refs (12 conditions).
 
-Defines REFERENCE_DATA (7 rough conditions, no wheel), terrain geometry,
-time-gated cost function with Y-jitter, and CMAES_X0.
+Matches the old 10_30_50 setup for apples-to-apples comparison with Euler baseline.
 """
 
 from typing import Any
@@ -17,97 +16,86 @@ from config import (
 )
 
 # ---------------------------------------------------------------------------
-# Scene XMLs (rough terrain, RK4 baked in)
-# No wheel — only 40% success rate on rough terrain
+# Scene XMLs (flat terrain, RK4 baked in)
 # ---------------------------------------------------------------------------
 MJCF_PATHS: dict[str, str] = {
-    "scene1": str(PACKAGE_DIR / "robots" / "quad" / "scene_1_rough.xml"),
-    "scene2": str(PACKAGE_DIR / "robots" / "quad" / "scene_2_rough.xml"),
-    "scene4": str(PACKAGE_DIR / "robots" / "quad" / "scene_4_rough.xml"),
+    "scene1":      str(PACKAGE_DIR / "robots" / "quad"  / "scene_1_flat.xml"),
+    "scene2":      str(PACKAGE_DIR / "robots" / "quad"  / "scene_2_flat.xml"),
+    "scene4":      str(PACKAGE_DIR / "robots" / "quad"  / "scene_4_flat.xml"),
+    "scene_wheel": str(PACKAGE_DIR / "robots" / "wheel" / "scene_wheel_flat.xml"),
 }
-
-# ---------------------------------------------------------------------------
-# Terrain geometry (fixed layout — seed=42 heightmap)
-# ---------------------------------------------------------------------------
-TERRAIN_NX = 10
-TERRAIN_NY = 6
-TERRAIN_SL = 0.005
-N_TILES = 3
-FLAT_LEAD = 0.005
-
-# Spawn offset: near terrain start, 10mm above ground
-# (matches eval_rough_terrain.py: robot starts near front, walks full terrain length)
-_TOTAL_NX = TERRAIN_NX * N_TILES
-_X_HALF = _TOTAL_NX * TERRAIN_SL / 2.0
-SPAWN_X = FLAT_LEAD + 0.025  # 25mm into terrain (near start edge, ~125mm ahead)
-SPAWN_Z_RAISE = 0.01
 
 # ---------------------------------------------------------------------------
 # Simulation / optimization parameters
 # ---------------------------------------------------------------------------
-SIM_DURATION = 2.0
+SIM_DURATION = 3.0
 N_CALLS = 4800
 BATCH_SIZE = 16
+INIT_YAW_JITTER_DEG = 2
 INIT_JITTER_TRIALS = 3
-Y_JITTER = 0.003           # ±3mm Y offset
-Y_JITTER_SEED = 77777
+INIT_JITTER_SEED = 12345
 VELOCITY_DEADZONE = False
 JITTER_AGGREGATION = "median"
 
 # Cost weights
 VELOCITY_COST_WEIGHT = 5.0
-TUMBLE_COST_WEIGHT = 2.0
+TUMBLE_COST_WEIGHT = 1.0
 LATERAL_COST_WEIGHT = 5.0
 VELOCITY_VARIANCE_WEIGHT = 2.0
 YAW_COST_WEIGHT = 1.0
 YAW_THRESHOLD_DEG = 60.0
-TUMBLE_THRESHOLD = 0.17     # cos(80°) — penalize tilt past 80°
+TUMBLE_THRESHOLD = 0.0
 TUMBLE_PENALTY_SCALE = 0.1
 
 # CMA-ES
-CMAES_SIGMA0 = 0.3
+CMAES_SIGMA0 = 0.15
 OPTIMIZER_RANDOM_STATE = 69420
 
 # ---------------------------------------------------------------------------
-# Warm-start: best from zzz_rough_v2 (Euler, cost=0.3949)
+# Warm-start: best from 20260225T122342_flat_10_30_50 (Euler, cost=0.1276)
 # ---------------------------------------------------------------------------
 CMAES_X0: dict[str, float] | None = {
-    "sliding_friction": 0.625649065196989,
-    "torsional_friction": 0.0001577896719328836,
-    "rolling_friction": 1.6999818728634566e-06,
-    "solref_timeconst": 0.0008451887608978624,
-    "solref_dampratio": 4.077074329871974,
-    "solimp_dmin": 0.3285187962568,
-    "solimp_delta_d": 0.602195907788976,
-    "solimp_width": 2.101968017904397e-05,
-    "solimp_midpoint": 0.8771918576448682,
-    "solimp_power": 5.413792421292177,
-    "magnetic_moment_fudge": 0.8957245963324068,
-    "magnetic_field_fudge": 1.165693360752599,
-    "dof_damping": 9.535192105821565e-10,
-    "noslip_iterations": 0.37419076188152406,
-    "noslip_tolerance": 1.1735746000014794e-06,
-    "margin": 4.577884774903134e-06,
+    "sliding_friction": 0.4067415162382437,
+    "torsional_friction": 0.0001598832061548777,
+    "rolling_friction": 4.591348631378625e-06,
+    "solref_timeconst": 0.002046553443113131,
+    "solref_dampratio": 3.8186561171444096,
+    "solimp_dmin": 0.43524706654498085,
+    "solimp_delta_d": 0.988954449244754,
+    "solimp_width": 4.6887126279039634e-05,
+    "solimp_midpoint": 0.6473380150564967,
+    "solimp_power": 5.037567575958023,
+    "magnetic_moment_fudge": 0.6545005423370444,
+    "magnetic_field_fudge": 1.1389204964634818,
+    "dof_damping": 5.324867233622363e-10,
+    "noslip_iterations": 0.16236228774673808,
+    "noslip_tolerance": 1.0341954878538795e-06,
+    "margin": 0.0006920906564202648,
 }
 
 # ---------------------------------------------------------------------------
-# Reference data (7 rough conditions, >=60% success rate)
+# Reference data (12 flat conditions — f10/f30/f50 only, no f20)
 # ---------------------------------------------------------------------------
 REFERENCE_DATA: list[dict[str, Any]] = [
-    # Single leg (scene1) — f10: 80%, f30: 80%
-    {"scene": "scene1", "ctrl_freq": 10.0, "speed": 0.04292, "speed_std": 0.00101, "weight": 1.0},
-    {"scene": "scene1", "ctrl_freq": 30.0, "speed": 0.08162, "speed_std": 0.00974, "weight": 1.0},
-    # Double leg (scene2) — f10: 100%, f30: 80%, f50: 60%
-    {"scene": "scene2", "ctrl_freq": 10.0, "speed": 0.06559, "speed_std": 0.00548, "weight": 1.0},
-    {"scene": "scene2", "ctrl_freq": 30.0, "speed": 0.12888, "speed_std": 0.00027, "weight": 1.0},
-    {"scene": "scene2", "ctrl_freq": 50.0, "speed": 0.10624, "speed_std": 0.03240, "weight": 1.0},
-    # Quad leg (scene4) — f10: 100%, f30: 80%
-    {"scene": "scene4", "ctrl_freq": 10.0, "speed": 0.08565, "speed_std": 0.00695, "weight": 1.0},
-    {"scene": "scene4", "ctrl_freq": 30.0, "speed": 0.14602, "speed_std": 0.03684, "weight": 1.0},
+    # Single leg (scene1)
+    {"scene": "scene1", "ctrl_freq": 10.0, "speed": 0.0512, "speed_std": 0.0024, "weight": 1.0},
+    {"scene": "scene1", "ctrl_freq": 30.0, "speed": 0.1187, "speed_std": 0.0127, "weight": 1.0},
+    {"scene": "scene1", "ctrl_freq": 50.0, "speed": 0.1483, "speed_std": 0.0131, "weight": 1.0},
+    # Double leg (scene2)
+    {"scene": "scene2", "ctrl_freq": 10.0, "speed": 0.0832, "speed_std": 0.0014, "weight": 1.0},
+    {"scene": "scene2", "ctrl_freq": 30.0, "speed": 0.1796, "speed_std": 0.0179, "weight": 1.0},
+    {"scene": "scene2", "ctrl_freq": 50.0, "speed": 0.2633, "speed_std": 0.0257, "weight": 1.0},
+    # Quad leg (scene4)
+    {"scene": "scene4", "ctrl_freq": 10.0, "speed": 0.1121, "speed_std": 0.0060, "weight": 1.0},
+    {"scene": "scene4", "ctrl_freq": 30.0, "speed": 0.2747, "speed_std": 0.0207, "weight": 1.0},
+    {"scene": "scene4", "ctrl_freq": 50.0, "speed": 0.3274, "speed_std": 0.0556, "weight": 1.0},
+    # Wheel
+    {"scene": "scene_wheel", "ctrl_freq": 10.0, "speed": 0.1432, "speed_std": 0.0013, "weight": 1.0},
+    {"scene": "scene_wheel", "ctrl_freq": 30.0, "speed": 0.4493, "speed_std": 0.0183, "weight": 1.0},
 ]
 
 # ---------------------------------------------------------------------------
-# Cost function (time-gated, after SETTLE_TIME — same as flat)
+# Cost function (time-gated, after SETTLE_TIME)
 # ---------------------------------------------------------------------------
 
 _BODY_Z_LOCAL = np.array([0.0, 0.0, 1.0])
@@ -121,7 +109,7 @@ def calculate_cost(
     speed_std: float = 0.0,
     verbose: bool = True,
 ) -> dict[str, float]:
-    """Rough cost: time-gated (after SETTLE_TIME), no spatial gating."""
+    """Flat cost: time-gated (after SETTLE_TIME), no spatial gating."""
     fail = {
         "total_cost": COST_FAILURE, "avg_forward_velocity": 0,
         "tumble_penalty": 0, "lateral_displacement": 0, "yaw_deviation_deg": 0,

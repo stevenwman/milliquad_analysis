@@ -35,11 +35,10 @@ TERRAIN_SL = 0.005
 N_TILES = 3
 FLAT_LEAD = 0.005
 
-# Spawn offset: near terrain start, 10mm above ground
-# (matches eval_rough_terrain.py: robot starts near front, walks full terrain length)
+# Spawn offset: center of terrain in X, 10mm above ground
 _TOTAL_NX = TERRAIN_NX * N_TILES
 _X_HALF = _TOTAL_NX * TERRAIN_SL / 2.0
-SPAWN_X = FLAT_LEAD + 0.025  # 25mm into terrain (near start edge, ~125mm ahead)
+SPAWN_X = FLAT_LEAD + _X_HALF
 SPAWN_Z_RAISE = 0.01
 
 # ---------------------------------------------------------------------------
