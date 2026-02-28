@@ -113,7 +113,7 @@ def _evaluate_one_scene(args):
 
     t0 = time.perf_counter()
 
-    if terrain == "rough":
+    if terrain.startswith("rough"):
         y_jitter_seed = task_cfg["y_jitter_seed"]
         y_jitter = task_cfg["y_jitter"]
         spawn_x = task_cfg["spawn_x"]
