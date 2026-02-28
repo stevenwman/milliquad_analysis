@@ -63,8 +63,6 @@ YAW_THRESHOLD_DEG = 60.0
 TUMBLE_THRESHOLD = 0.17     # cos(80°) — penalize tilt past 80°
 TUMBLE_PENALTY_SCALE = 0.1
 
-COST_FAILURE_VAL = 1e6
-
 # CMA-ES
 CMAES_SIGMA0 = 0.3
 OPTIMIZER_RANDOM_STATE = 69420
@@ -124,7 +122,7 @@ def calculate_cost(
 ) -> dict[str, float]:
     """Rough cost: time-gated (after SETTLE_TIME), no spatial gating."""
     fail = {
-        "total_cost": COST_FAILURE_VAL, "avg_forward_velocity": 0,
+        "total_cost": COST_FAILURE, "avg_forward_velocity": 0,
         "tumble_penalty": 0, "lateral_displacement": 0, "yaw_deviation_deg": 0,
     }
     if not trajectory:
