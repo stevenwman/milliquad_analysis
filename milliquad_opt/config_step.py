@@ -67,8 +67,6 @@ TUMBLE_THRESHOLD = 0.0
 TUMBLE_PENALTY_SCALE = 0.1
 PROGRESS_COST_WEIGHT = 2.0
 
-COST_FAILURE_VAL = 1e6
-
 # Failure mode velocity scale
 FAILURE_MODE_VEL_SCALE = 0.05
 
@@ -137,7 +135,7 @@ def calculate_cost(
 ) -> dict[str, float]:
     """Step-aware cost: spatial-gated (pos[0] >= STEP_START_X), with progress penalty."""
     fail = {
-        "total_cost": COST_FAILURE_VAL, "avg_forward_velocity": 0,
+        "total_cost": COST_FAILURE, "avg_forward_velocity": 0,
         "tumble_penalty": 0, "lateral_displacement": 0, "yaw_deviation_deg": 0,
         "progress_penalty": 1.0,
     }

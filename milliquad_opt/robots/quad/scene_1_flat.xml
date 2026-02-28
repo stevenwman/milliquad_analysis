@@ -17,4 +17,5 @@
         <light pos="0 0 3.5" dir="0 0 -1" directional="true" />
         <geom name="floor" size="0 0 0.05" pos="0 0 0" type="plane" material="groundplane" />
     </worldbody>
+<size memory="128M" />
 <option integrator="RK4"><flag energy="enable" /></option></mujoco>
