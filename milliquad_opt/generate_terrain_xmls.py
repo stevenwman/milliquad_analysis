@@ -185,6 +185,17 @@ def inject_rough(flat_xml: pathlib.Path, out_xml: pathlib.Path) -> None:
         wall.set("contype", "1")
         wall.set("conaffinity", "1")
 
+    # Back wall to prevent robot escaping behind the terrain
+    back_x = FLAT_LEAD  # at terrain start edge
+    back_wall = ET.SubElement(worldbody, "geom")
+    back_wall.set("name", "wall_back")
+    back_wall.set("type", "box")
+    back_wall.set("size", f"{wall_thick} {y_half + 2 * wall_thick} {wall_height}")
+    back_wall.set("pos", f"{back_x} 0.0 {wall_height}")
+    back_wall.set("rgba", "0.7 0.8 1.0 0.3")
+    back_wall.set("contype", "1")
+    back_wall.set("conaffinity", "1")
+
     tree.write(str(out_xml))
     print(f"  rough → {out_xml.name} + {png_path.name}")
 

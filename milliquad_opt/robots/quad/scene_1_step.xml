@@ -17,4 +17,5 @@
         <light pos="0 0 3.5" dir="0 0 -1" directional="true" />
         <geom name="floor" size="0 0 0.05" pos="0 0 0" type="plane" material="groundplane" />
     <geom name="step_0" type="box" size="0.00225 0.05 0.0005" pos="0.052250000000000005 0.0 0.0005" rgba="0.5 0.5 0.5 1" /><geom name="step_1" type="box" size="0.00225 0.05 0.0005" pos="0.05675 0.0 0.0015" rgba="0.5 0.5 0.5 1" /><geom name="step_2" type="box" size="0.00225 0.05 0.0005" pos="0.061250000000000006 0.0 0.0025" rgba="0.5 0.5 0.5 1" /><geom name="step_3" type="box" size="0.00225 0.05 0.0005" pos="0.06575 0.0 0.0035" rgba="0.5 0.5 0.5 1" /><geom name="step_4" type="box" size="0.00225 0.05 0.0005" pos="0.07025 0.0 0.0045000000000000005" rgba="0.5 0.5 0.5 1" /><geom name="step_5" type="box" size="0.00225 0.05 0.0005" pos="0.07475000000000001 0.0 0.0055" rgba="0.5 0.5 0.5 1" /><geom name="step_6" type="box" size="0.00225 0.05 0.0005" pos="0.07925 0.0 0.006500000000000001" rgba="0.5 0.5 0.5 1" /><geom name="step_7" type="box" size="0.01 0.05 0.0005" pos="0.0915 0.0 0.0075" rgba="0.5 0.5 0.5 1" /></worldbody>
-<option integrator="RK4"><flag energy="enable" /></option><size memory="128M" /></mujoco>
+<size memory="128M" />
+<option integrator="RK4"><flag energy="enable" /></option></mujoco>

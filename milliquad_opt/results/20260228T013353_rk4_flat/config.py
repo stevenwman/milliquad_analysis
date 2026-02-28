@@ -156,10 +156,8 @@ def csv_fieldnames(ref_data: list[dict[str, Any]], mjcf_paths: dict[str, str],
 # Parameter conversion
 # ---------------------------------------------------------------------------
 
-def point_to_params(point: list[float] | dict[str, float]) -> dict[str, float]:
-    """Convert an optimizer point (list in space order, or dict) to a named dict."""
-    if isinstance(point, dict):
-        return {dim.name: point[dim.name] for dim in space}
+def point_to_params(point: list[float]) -> dict[str, float]:
+    """Convert an optimizer point (list in space order) to a named dict."""
     return {dim.name: point[i] for i, dim in enumerate(space)}
 
 
