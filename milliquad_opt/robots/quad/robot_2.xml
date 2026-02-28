@@ -1,0 +1,84 @@
+<?xml version="1.0" ?>
+<!-- Generated using onshape-to-robot -->
+<!-- Onshape https://cad.onshape.com/documents/fb40679e5085125a52f9d8c2/w/bc70b1a5b80ef34e9536dda2/e/fa25152c06c6fd7e13daf977 -->
+<mujoco model="mulit_milli_quad">
+  <compiler angle="radian" meshdir="assets" autolimits="true"/>
+  <default>
+    <default class="mulit_milli_quad">
+      <!-- <joint frictionloss="2e-7"/> -->
+      <default class="magnet">
+        <geom mass="9e-6" type="mesh" mesh="magnet" material="magnet_material"/>
+      </default>
+      <default class="leg">
+        <geom mass="5e-7" type="mesh" mesh="right_leg_leg" material="right_leg_leg_material"/>
+      </default>
+      <default class="leg_box">
+        <geom mass="3e-6" type="mesh" mesh="right_leg_box" material="right_leg_box_material"/>
+      </default>
+      <default class="body">
+        <geom mass="5.3e-5" type="mesh" mesh="body" material="body_material"/>
+      </default>
+    </default>
+  </default>
+  <worldbody>
+    <!-- Link body -->
+    <body name="body" pos="0 0 0" quat="1 0 0 0" childclass="mulit_milli_quad">
+      <freejoint name="body_freejoint"/>
+      <geom class="body" pos="0 0 -0.00268252" quat="0 0 1 0"/>  <!-- FLIPPED 180° around Y-axis (roll) + Z offset -->
+      <!-- Link right_leg_box -->
+      <body name="right_leg_box" pos="0.00342 -0.00298 -0.00134126" quat="0.707107 0.707107 -0 -0">
+        <joint axis="0 0 1" name="FR" type="hinge"/>
+        <!-- <geom class="leg" pos="0 0 0" quat="0.707107 -0 1.13408e-16 0.707107"/> -->
+        <geom class="leg" pos="0 0 0" quat="6.12323e-17 0 0 1"/>
+        <!-- <geom class="leg" pos="0 0 0" quat="0.707107 0 0 -0.707107"/> -->
+        <geom class="leg" pos="0 0 0" quat="1 0 0 0"/>
+        <geom class="leg_box" pos="0 0 0" quat="1 0 0 0"/>
+        <geom class="magnet" pos="0 0 0.00074" quat="0.707107 -0.707107 0 0"/>
+        
+      </body>
+      <!-- Link right_leg_box_2 -->
+      <body name="right_leg_box_2" pos="0.00342 0.00298 -0.00134126" quat="0 0 0.707107 0.707107">
+        <joint axis="0 0 1" name="FL" type="hinge"/>
+        <geom class="leg_box" pos="0 0 0" quat="1 0 0 0"/>
+        <!-- <geom class="leg" pos="-4.33681e-18 -4.33681e-19 0.002" quat="0 0.707107 0.707107 0"/> -->
+        <!-- <geom class="leg" pos="4.33681e-18 0 0.002" quat="0 -0.707107 0.707107 0"/> -->
+        <geom class="magnet" pos="4.33681e-19 0 0.00074" quat="3.83323e-17 -0 0.707107 0.707107"/>
+        <geom class="leg" pos="-4.33681e-19 -4.77049e-18 0.002" quat="1.44518e-33 -0 1 -0"/>
+        <geom class="leg" pos="-8.67362e-19 3.90313e-18 0.002" quat="-0 -1 -9.08232e-17 -0"/>
+        
+      </body>
+      <!-- Link right_leg_box_3 -->
+      <body name="right_leg_box_3" pos="-0.00342 -0.00298 -0.00134126" quat="0.707107 0.707107 -0 -0">
+        <joint axis="0 0 1" name="BR" type="hinge"/>
+        <geom class="magnet" pos="4.33681e-19 0 0.00074" quat="0.707107 -0.707107 0 0"/>
+        <!-- <geom class="leg" pos="0 0 0" quat="0.707107 0 1.26075e-16 -0.707107"/> -->
+        <geom class="leg_box" pos="0 0 0" quat="1 0 0 0"/>
+        <geom class="leg" pos="0 -2.1684e-19 0" quat="6.12323e-17 0 0 1"/>
+        <geom class="leg" pos="0 0 0" quat="1 0 0 0"/>
+        <!-- <geom class="leg" pos="0 0 -8.67362e-19" quat="0.707107 0 0 0.707107"/> -->
+        
+      </body>
+      <!-- Link right_leg_box_4 -->
+      <body name="right_leg_box_4" pos="-0.00342 0.00298 -0.00134126" quat="0 0 0.707107 0.707107">
+        <joint axis="0 0 1" name="BL" type="hinge"/>
+        <geom class="leg" pos="-4.33681e-19 -3.90313e-18 0.002" quat="1.44518e-33 -0 1 -0"/>
+        <!-- <geom class="leg" pos="4.33681e-18 0 0.002" quat="0 -0.707107 0.707107 0"/> -->
+        <geom class="magnet" pos="4.33681e-19 4.33681e-19 0.00074" quat="3.83323e-17 -0 0.707107 0.707107"/>
+        <geom class="leg_box" pos="0 0 0" quat="1 0 0 0"/>
+        <!-- <geom class="leg" pos="-4.33681e-18 4.33681e-19 0.002" quat="0 0.707107 0.707107 0"/> -->
+        <geom class="leg" pos="4.33681e-19 5.20417e-18 0.002" quat="-0 -1 -9.08232e-17 -0"/>
+        
+      </body>
+    </body>
+  </worldbody>
+  <asset>
+    <mesh file="magnet.stl"/>
+    <mesh file="right_leg_leg.stl"/>
+    <mesh file="right_leg_box.stl"/>
+    <mesh file="body.stl"/>
+    <material name="body_material" rgba="0.796078 0.823529 0.937255 1"/>
+    <material name="right_leg_leg_material" rgba="0.796078 0.823529 0.937255 1"/>
+    <material name="right_leg_box_material" rgba="0.796078 0.823529 0.937255 1"/>
+    <material name="magnet_material" rgba="0.615686 0.811765 0.929412 1"/>
+  </asset>
+</mujoco>
