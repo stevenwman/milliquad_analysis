@@ -607,8 +607,8 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Unified CMA-ES parameter optimization")
-    parser.add_argument("--terrain", required=True, choices=["flat", "step", "rough"],
-                        help="Terrain type to optimize for")
+    parser.add_argument("--terrain", required=True,
+                        help="Terrain type to optimize for (must have a matching config_{terrain}.py)")
     parser.add_argument("--suffix", "-s", type=str, default="", help="Suffix for results folder")
     parser.add_argument("--scenes", nargs="+", default=None, help="Filter to these scenes")
     parser.add_argument("--freqs", nargs="+", type=float, default=None, help="Filter to these freqs")
@@ -759,6 +759,7 @@ if __name__ == "__main__":
 
     # Record best rollout videos
     print("\n--- Recording Best Rollout ---")
+    os.environ.setdefault("MUJOCO_GL", "egl")
     sim_module = importlib.import_module("simulation")
     sorted_results = sorted(all_results, key=lambda r: r["cost"])
 
