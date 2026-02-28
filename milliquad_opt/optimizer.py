@@ -540,7 +540,7 @@ def _run_batch_optimization(all_results: list[dict], pool: multiprocessing.Pool,
                     "ref_idx": ref_idx,
                     "n_trials": n_trials,
                 }
-                if _TERRAIN == "rough":
+                if _TERRAIN.startswith("rough"):
                     task_cfg["y_jitter_seed"] = Y_JITTER_SEED
                     task_cfg["y_jitter"] = Y_JITTER
                     task_cfg["spawn_x"] = SPAWN_X
@@ -634,7 +634,7 @@ if __name__ == "__main__":
     VELOCITY_VARIANCE_WEIGHT = config_mod.VELOCITY_VARIANCE_WEIGHT
     JITTER_AGGREGATION = config_mod.JITTER_AGGREGATION
 
-    if _TERRAIN == "rough":
+    if _TERRAIN.startswith("rough"):
         INIT_JITTER_TRIALS = config_mod.INIT_JITTER_TRIALS
         Y_JITTER = config_mod.Y_JITTER
         Y_JITTER_SEED = config_mod.Y_JITTER_SEED
@@ -645,7 +645,7 @@ if __name__ == "__main__":
         INIT_JITTER_TRIALS = config_mod.INIT_JITTER_TRIALS
         INIT_JITTER_SEED = config_mod.INIT_JITTER_SEED
 
-    if _TERRAIN == "step":
+    if _TERRAIN.startswith("step"):
         _EXTRA_CSV_COLS = ["progress", "best_trial"]
     elif JITTER_AGGREGATION == "best":
         _EXTRA_CSV_COLS = ["best_trial"]
@@ -781,7 +781,7 @@ if __name__ == "__main__":
             sim_params_scene["drive_freq"] = ref_row.get("ctrl_freq", DEFAULT_CTRL_FREQ)
 
             extra_kwargs = {}
-            if _TERRAIN == "rough":
+            if _TERRAIN.startswith("rough"):
                 extra_kwargs["spawn_offset"] = (SPAWN_X, 0.0, SPAWN_Z_RAISE)
 
             sim_module.run_simulation(
