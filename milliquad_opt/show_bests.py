@@ -40,6 +40,8 @@ def _bound_flag(name: str, value: float) -> str:
 def main():
     parser = argparse.ArgumentParser(description="Show optimization bests")
     parser.add_argument("path", nargs="?", default=None, help="Path to results dir or CSV")
+    parser.add_argument("--terrain", "-t", default=None,
+                        help="Terrain config for targets (flat, step, rough, flat_no20)")
     args = parser.parse_args()
 
     if args.path:
@@ -67,17 +69,27 @@ def main():
 
     # Detect ref IDs from vel_* columns
     ref_ids = [k[4:] for k in rows[0] if k.startswith("vel_")]
-    # Infer targets: not available in bests CSV, so we show sim values only
-    # Try to load from terrain config if available
+
+    # Determine terrain type for correct reference targets
+    terrain = args.terrain
+    if terrain is None:
+        # Auto-detect from results dir name (e.g. "20260228T..._rk4_flat")
+        dir_name = pathlib.Path(path).parent.name
+        for t in ["flat_no20", "flat", "step", "rough"]:
+            if t in dir_name:
+                terrain = t
+                break
+    if terrain is None:
+        terrain = "flat"  # fallback
+
     targets = {}
-    for terrain in ["flat", "step", "rough"]:
-        try:
-            mod = __import__(f"config_{terrain}")
-            from config import reference_rows as _rr
-            for row in _rr(mod.REFERENCE_DATA):
-                targets[row["id"]] = row["speed"]
-        except Exception:
-            pass
+    from config import reference_rows as _rr
+    try:
+        mod = __import__(f"config_{terrain}")
+        for row in _rr(mod.REFERENCE_DATA):
+            targets[row["id"]] = row["speed"]
+    except Exception as e:
+        print(f"  WARNING: could not load config_{terrain}: {e}", file=sys.stderr)
 
     has_lateral = f"lateral_{ref_ids[0]}" in rows[0] if ref_ids else False
     has_yaw = f"yaw_{ref_ids[0]}" in rows[0] if ref_ids else False
