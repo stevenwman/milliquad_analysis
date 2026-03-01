@@ -6,7 +6,7 @@ the top N_SELECT by velocity match. Reports mean +/- std velocity error and COT.
 
 Flat/Step: yaw jitter (matching optimizer's INIT_YAW_JITTER_DEG)
 Rough: Y-position jitter (matching optimizer's Y_JITTER)
-Step failure refs (target=0): verify robot doesn't move, report pass/fail.
+Failure mode refs (target=0): N_TRIALS with jitter, random selection.
 
 Uses different base seeds than the optimizer to test generalization.
 
@@ -36,6 +36,7 @@ from analysis._common import (
     extract_velocity,
     compute_cot,
     compute_pitch_rms,
+    compute_pitch_series,
     min_window_velocity,
     SETTLE_TIME,
 )
@@ -45,8 +46,6 @@ N_TRIALS_DEFAULT = 5
 N_SELECT_DEFAULT = 3
 # Different from optimizer seeds (12345 yaw, 77777 Y) to test generalization
 BASE_SEED = 99999
-FAILURE_VX_THRESHOLD = 0.005  # m/s — below this, robot is "not moving"
-
 # Experimental CSV morphology → scene name mapping
 _MORPH_TO_SCENE = {"leg": "scene1", "2-leg": "scene2", "4-leg": "scene4", "wheel": "scene_wheel"}
 
@@ -178,7 +177,6 @@ def main():
 
     all_trial_rows: list[dict] = []
     ref_summaries: list[dict] = []
-    failure_mode_results: list[dict] = []
     replay_specs: list[dict] = []  # for --record: re-run selected trials with video
     traj_arrays: dict[str, np.ndarray] = {}  # {rid}_t{trial}_{time,pos_x} → 1D array
 
@@ -193,39 +191,13 @@ def main():
 
         mass = scene_mass[scene]
 
-        # --- Failure mode refs (target=0): single trial, no jitter ---
-        if target < 1e-9:
-            sp = dict(sim_params)
-            sp["drive_freq"] = freq
+        is_failure = target < 1e-9
 
-            extra_kw: dict = {}
-            if is_rough:
-                extra_kw["spawn_offset"] = (spawn_x, 0.0, spawn_z)
-
-            print(f"  {rid} (failure mode, target=0) ...", end="", flush=True)
-
-            try:
-                traj = sim_module.run_simulation(
-                    sp, mjcf_path=MJCF_PATHS[scene],
-                    sim_duration=SIM_DURATION, visualize=False, progress=False,
-                    ignore_stuck_detection=True, **extra_kw,
-                )
-            except Exception:
-                traj = None
-
-            if traj is None:
-                print(" CRASH")
-                failure_mode_results.append({"id": rid, "result": "CRASH", "vx": None})
-            else:
-                vx = extract_velocity(traj, SETTLE_TIME, step_start_x, step_end_x)
-                passed = abs(vx) < FAILURE_VX_THRESHOLD
-                status = "PASS" if passed else f"FAIL (vx={vx*100:.2f}cm/s)"
-                print(f" vx={vx*100:.2f}cm/s  {status}")
-                failure_mode_results.append({"id": rid, "result": "PASS" if passed else "FAIL", "vx": vx})
-            continue
-
-        # --- Normal refs: N_TRIALS jittered trials ---
-        print(f"  {rid}  f={freq:.0f}Hz  target={target*100:.1f}cm/s")
+        # --- All refs: N_TRIALS jittered trials ---
+        if is_failure:
+            print(f"  {rid}  f={freq:.0f}Hz  (failure mode, target=0)")
+        else:
+            print(f"  {rid}  f={freq:.0f}Hz  target={target*100:.1f}cm/s")
         trials: list[dict] = []
 
         for t in range(N_TRIALS):
@@ -262,7 +234,7 @@ def main():
                 trials.append({"trial": t, "seed": seed, "jitter_type": jitter_type,
                                "jitter_value": jitter_value, "vx": None,
                                "err": float("inf"), "cot": None, "crash": True,
-                               "min_window_vx": 0.0, "pitch_rms": None})
+                               "min_window_vx": 0.0, "pitch_rms": None, "max_x": None})
                 continue
 
             if traj is None:
@@ -270,14 +242,17 @@ def main():
                 trials.append({"trial": t, "seed": seed, "jitter_type": jitter_type,
                                "jitter_value": jitter_value, "vx": None,
                                "err": float("inf"), "cot": None, "crash": True,
-                               "min_window_vx": 0.0, "pitch_rms": None})
+                               "min_window_vx": 0.0, "pitch_rms": None, "max_x": None})
                 continue
 
             vx = extract_velocity(traj, SETTLE_TIME, step_start_x, step_end_x)
             traj_key = f"{rid}_t{t}"
+            pos_x_arr = np.array([s["pos"][0] for s in traj])
             traj_arrays[f"{traj_key}_time"] = np.array([s["time"] for s in traj])
-            traj_arrays[f"{traj_key}_pos_x"] = np.array([s["pos"][0] for s in traj])
-            err = abs(vx - target) / target * 100
+            traj_arrays[f"{traj_key}_pos_x"] = pos_x_arr
+            traj_arrays[f"{traj_key}_pitch"] = compute_pitch_series(traj)
+            max_x = float(pos_x_arr.max())
+            err = None if is_failure else abs(vx - target) / target * 100
             cot = compute_cot(traj, mass, SETTLE_TIME,
                               step_start_x=step_start_x, step_end_x=step_end_x)
             mwv = min_window_velocity(traj, freq, SETTLE_TIME,
@@ -286,17 +261,30 @@ def main():
                                          step_start_x=step_start_x, step_end_x=step_end_x)
 
             cot_str = f"  COT={cot:.2f}" if cot is not None else ""
-            print(f" vx={vx*100:.1f}cm/s  err={err:.1f}%{cot_str}  mwv={mwv*100:.1f}mm/s  pitch={pitch_rms:.1f}°")
+            if is_failure:
+                print(f" vx={vx*100:.1f}cm/s{cot_str}  mwv={mwv*100:.1f}mm/s  pitch={pitch_rms:.1f}°")
+            else:
+                print(f" vx={vx*100:.1f}cm/s  err={err:.1f}%{cot_str}  mwv={mwv*100:.1f}mm/s  pitch={pitch_rms:.1f}°")
 
             trials.append({"trial": t, "seed": seed, "jitter_type": jitter_type,
                            "jitter_value": jitter_value, "vx": vx,
                            "err": err, "cot": cot, "crash": False,
-                           "min_window_vx": mwv, "pitch_rms": pitch_rms})
+                           "min_window_vx": mwv, "pitch_rms": pitch_rms,
+                           "max_x": max_x})
 
-        # Select top N_SELECT by velocity error
+        # Select top N_SELECT
         valid = [tr for tr in trials if not tr["crash"]]
-        valid.sort(key=lambda tr: tr["err"])
-        selected_set = set(id(tr) for tr in valid[:N_SELECT])
+        if is_failure:
+            # Random selection (like exploratory — no meaningful target to rank by)
+            if len(valid) > N_SELECT:
+                rng_sel = np.random.default_rng(BASE_SEED + ref_idx)
+                sel_indices = rng_sel.choice(len(valid), size=N_SELECT, replace=False)
+                selected_set = set(id(valid[i]) for i in sel_indices)
+            else:
+                selected_set = set(id(tr) for tr in valid)
+        else:
+            valid.sort(key=lambda tr: tr["err"])
+            selected_set = set(id(tr) for tr in valid[:N_SELECT])
 
         for tr in trials:
             tr["selected"] = id(tr) in selected_set
@@ -304,19 +292,27 @@ def main():
         selected = [tr for tr in trials if tr["selected"]]
 
         if selected:
-            sel_errs = [tr["err"] for tr in selected]
-            sel_cots = [tr["cot"] for tr in selected if tr["cot"] is not None]
-            mean_err = float(np.mean(sel_errs))
-            std_err = float(np.std(sel_errs))
-            mean_cot = float(np.mean(sel_cots)) if sel_cots else None
+            if is_failure:
+                sel_vxs = [abs(tr["vx"]) * 100 for tr in selected if tr["vx"] is not None]
+                cot_str = ""
+                sel_cots = [tr["cot"] for tr in selected if tr["cot"] is not None]
+                if sel_cots:
+                    cot_str = f"  COT={np.mean(sel_cots):.2f}"
+                print(f"    >> random {len(selected)}: vx={np.mean(sel_vxs):.2f} +/- {np.std(sel_vxs):.2f} cm/s{cot_str}")
+            else:
+                sel_errs = [tr["err"] for tr in selected]
+                sel_cots = [tr["cot"] for tr in selected if tr["cot"] is not None]
+                mean_err = float(np.mean(sel_errs))
+                std_err = float(np.std(sel_errs))
+                mean_cot = float(np.mean(sel_cots)) if sel_cots else None
 
-            cot_str = f"  COT={mean_cot:.2f}" if mean_cot is not None else ""
-            print(f"    >> top {N_SELECT}: err={mean_err:.1f} +/- {std_err:.1f}%{cot_str}")
+                cot_str = f"  COT={mean_cot:.2f}" if mean_cot is not None else ""
+                print(f"    >> top {N_SELECT}: err={mean_err:.1f} +/- {std_err:.1f}%{cot_str}")
 
-            ref_summaries.append({
-                "id": rid, "scene": scene, "freq": freq, "target": target,
-                "mean_err": mean_err, "std_err": std_err, "mean_cot": mean_cot,
-            })
+                ref_summaries.append({
+                    "id": rid, "scene": scene, "freq": freq, "target": target,
+                    "mean_err": mean_err, "std_err": std_err, "mean_cot": mean_cot,
+                })
 
             # Store replay specs for recording
             if args.record:
@@ -344,11 +340,12 @@ def main():
                 "target_speed": target, "trial": tr["trial"], "rng_seed": tr["seed"],
                 "jitter_type": tr["jitter_type"], "jitter_value": tr["jitter_value"],
                 "vx": tr["vx"] if tr["vx"] is not None else "",
-                "velocity_error_pct": tr["err"] if not tr["crash"] else "",
+                "velocity_error_pct": tr["err"] if (not tr["crash"] and tr["err"] is not None) else "",
                 "cot": tr["cot"] if tr["cot"] is not None else "",
                 "crash": tr["crash"], "selected": tr["selected"],
                 "min_window_vx": tr.get("min_window_vx", ""),
                 "pitch_rms": tr["pitch_rms"] if tr["pitch_rms"] is not None else "",
+                "max_x": tr["max_x"] if tr["max_x"] is not None else "",
             })
 
     # --- Exploratory conditions (rough only, no optimization target) ---
@@ -398,7 +395,7 @@ def main():
                     trials.append({"trial": t, "seed": seed, "jitter_type": jitter_type,
                                    "jitter_value": jitter_value, "vx": None,
                                    "cot": None, "crash": True, "min_window_vx": 0.0,
-                                   "pitch_rms": None})
+                                   "pitch_rms": None, "max_x": None})
                     continue
 
                 if traj is None:
@@ -406,16 +403,22 @@ def main():
                     trials.append({"trial": t, "seed": seed, "jitter_type": jitter_type,
                                    "jitter_value": jitter_value, "vx": None,
                                    "cot": None, "crash": True, "min_window_vx": 0.0,
-                                   "pitch_rms": None})
+                                   "pitch_rms": None, "max_x": None})
                     continue
 
-                vx = extract_velocity(traj, SETTLE_TIME)
+                vx = extract_velocity(traj, SETTLE_TIME, step_start_x, step_end_x)
                 traj_key = f"{rid}_t{t}"
+                pos_x_arr = np.array([s["pos"][0] for s in traj])
                 traj_arrays[f"{traj_key}_time"] = np.array([s["time"] for s in traj])
-                traj_arrays[f"{traj_key}_pos_x"] = np.array([s["pos"][0] for s in traj])
-                cot = compute_cot(traj, mass, SETTLE_TIME)
-                mwv = min_window_velocity(traj, freq, SETTLE_TIME)
-                pitch_rms = compute_pitch_rms(traj, SETTLE_TIME)
+                traj_arrays[f"{traj_key}_pos_x"] = pos_x_arr
+                traj_arrays[f"{traj_key}_pitch"] = compute_pitch_series(traj)
+                max_x = float(pos_x_arr.max())
+                cot = compute_cot(traj, mass, SETTLE_TIME,
+                                  step_start_x=step_start_x, step_end_x=step_end_x)
+                mwv = min_window_velocity(traj, freq, SETTLE_TIME,
+                                          step_start_x=step_start_x, step_end_x=step_end_x)
+                pitch_rms = compute_pitch_rms(traj, SETTLE_TIME,
+                                              step_start_x=step_start_x, step_end_x=step_end_x)
 
                 cot_str = f"  COT={cot:.2f}" if cot is not None else ""
                 print(f" vx={vx*100:.1f}cm/s{cot_str}  mwv={mwv*100:.1f}mm/s  pitch={pitch_rms:.1f}°")
@@ -423,7 +426,7 @@ def main():
                 trials.append({"trial": t, "seed": seed, "jitter_type": jitter_type,
                                "jitter_value": jitter_value, "vx": vx,
                                "cot": cot, "crash": False, "min_window_vx": mwv,
-                               "pitch_rms": pitch_rms})
+                               "pitch_rms": pitch_rms, "max_x": max_x})
 
             # Random selection (no sorting by error)
             valid = [tr for tr in trials if not tr["crash"]]
@@ -479,6 +482,7 @@ def main():
                     "crash": tr["crash"], "selected": tr["selected"],
                     "min_window_vx": tr.get("min_window_vx", ""),
                     "pitch_rms": tr["pitch_rms"] if tr["pitch_rms"] is not None else "",
+                    "max_x": tr["max_x"] if tr["max_x"] is not None else "",
                 })
 
     # --- Summary ---
@@ -498,13 +502,6 @@ def main():
             print(f"  Mean COT:            {np.mean(all_cots):.2f}")
             print(f"  COT range:           {min(all_cots):.2f} - {max(all_cots):.2f}")
 
-    if failure_mode_results:
-        n_pass = sum(1 for fm in failure_mode_results if fm["result"] == "PASS")
-        print(f"\n  Failure mode refs:   {n_pass}/{len(failure_mode_results)} passed")
-        for fm in failure_mode_results:
-            vx_str = f"vx={fm['vx']*100:.2f}cm/s" if fm["vx"] is not None else "CRASH"
-            print(f"    {fm['id']}: {fm['result']}  ({vx_str})")
-
     if exploratory_summaries:
         print(f"\n  Exploratory (no target, random selection):")
         for es in exploratory_summaries:
@@ -514,7 +511,7 @@ def main():
 
     # --- Video recording pass ---
     if args.record and replay_specs:
-        video_dir = pathlib.Path("videos") / terrain
+        video_dir = args.run_dir / "videos"
         video_dir.mkdir(parents=True, exist_ok=True)
         print(f"\n  Recording {len(replay_specs)} selected trials to {video_dir}/")
         for i, spec in enumerate(replay_specs):
@@ -540,7 +537,7 @@ def main():
     if args.csv and traj_arrays:
         npz_path = args.run_dir / "validation_trajectories.npz"
         np.savez_compressed(npz_path, **traj_arrays)
-        print(f"\n  Trajectories: {npz_path} ({len(traj_arrays)//2} trials)")
+        print(f"\n  Trajectories: {npz_path} ({len(traj_arrays)//3} trials)")
 
     # --- CSV output ---
     if args.csv and all_trial_rows:
@@ -549,13 +546,18 @@ def main():
             "ref_id", "scene", "ctrl_freq", "target_speed", "trial",
             "rng_seed", "jitter_type", "jitter_value", "vx",
             "velocity_error_pct", "cot", "crash", "selected", "min_window_vx",
-            "pitch_rms",
+            "pitch_rms", "max_x",
         ]
         with open(csv_path, "w", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(all_trial_rows)
         print(f"\n  CSV: {csv_path}")
+
+    # --- Trajectory overview plot ---
+    if args.csv and traj_arrays:
+        from analysis.plot_trajectories import plot_trajectory_overview
+        plot_trajectory_overview(args.run_dir, step_start_x, step_end_x)
 
 
 if __name__ == "__main__":

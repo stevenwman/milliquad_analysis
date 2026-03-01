@@ -97,6 +97,8 @@ REFERENCE_DATA: list[dict[str, Any]] = [
     {"scene": "scene_wheel", "ctrl_freq": 10.0, "speed": 0.1432, "speed_std": 0.0013, "weight": 1.0},
     {"scene": "scene_wheel", "ctrl_freq": 20.0, "speed": 0.3058, "speed_std": 0.0068, "weight": 1.0},
     {"scene": "scene_wheel", "ctrl_freq": 30.0, "speed": 0.4493, "speed_std": 0.0183, "weight": 1.0},
+    # WR f50: exp robot self-destructs at 50Hz; sim succeeds (~720 mm/s). Validation only.
+    {"scene": "scene_wheel", "ctrl_freq": 50.0, "speed": 0.0, "speed_std": 0.0, "weight": 0.0},
 ]
 
 # ---------------------------------------------------------------------------

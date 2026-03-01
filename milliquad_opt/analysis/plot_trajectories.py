@@ -1,4 +1,9 @@
-"""Plot x-position vs time for all validation trials, grouped by ref_id."""
+"""Plot x-position vs time for all validation trials, grouped by ref_id.
+
+Called automatically by validate_params.py when --csv is used,
+or standalone:
+    uv run python -m analysis.plot_trajectories results/20260228T202903_rough_spatial_rk4
+"""
 
 import csv
 import sys
@@ -8,15 +13,6 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
-
-# ── Config ───────────────────────────────────────────────────────────────
-RESULTS_DIR = Path(
-    "/home/sman/Work/CMU/Research/LEGO-milliquad-mujoco/"
-    "milliquad_opt/results/20260228T102010_rk4_rough"
-)
-NPZ_PATH = RESULTS_DIR / "validation_trajectories.npz"
-CSV_PATH = RESULTS_DIR / "validation_trials.csv"
-OUT_PATH = RESULTS_DIR / "trajectory_overview.png"
 
 SETTLE_TIME = 0.3  # seconds
 NCOLS = 4
@@ -31,10 +27,18 @@ TRIAL_COLORS = ["#1b9e77", "#d95f02", "#7570b3", "#e7298a", "#66a61e"]
 COLOR_UNSELECTED = "#bbbbbb"
 
 
-def main() -> None:
-    # Load data
-    traj = np.load(NPZ_PATH)
-    with open(CSV_PATH) as f:
+def plot_trajectory_overview(
+    run_dir: Path,
+    step_start_x: float | None = None,
+    step_end_x: float | None = None,
+) -> Path:
+    """Generate trajectory overview plot. Returns output path."""
+    npz_path = run_dir / "validation_trajectories.npz"
+    csv_path = run_dir / "validation_trials.csv"
+    out_path = run_dir / "trajectory_overview.png"
+
+    traj = np.load(npz_path)
+    with open(csv_path) as f:
         rows = list(csv.DictReader(f))
 
     # Build lookup: (ref_id, trial) -> row
@@ -68,7 +72,6 @@ def main() -> None:
             [r for r in rows if r["ref_id"] == ref_id],
             key=lambda r: int(r["trial"]),
         )
-        n_trials = len(trial_rows)
 
         # Plot non-selected first (behind), then selected on top
         for is_sel_pass in (False, True):
@@ -80,6 +83,8 @@ def main() -> None:
 
                 key_time = f"{ref_id}_t{trial_idx}_time"
                 key_pos = f"{ref_id}_t{trial_idx}_pos_x"
+                if key_time not in traj:
+                    continue
                 t = traj[key_time]
                 x_mm = traj[key_pos] * 1000.0  # m -> mm
 
@@ -98,19 +103,30 @@ def main() -> None:
         # Settle time marker
         ax.axvline(SETTLE_TIME, color="k", ls="--", lw=0.8, alpha=0.6, zorder=1)
 
+        # Spatial gate bounds (horizontal lines on x-position axis)
+        if step_start_x is not None:
+            ax.axhline(step_start_x * 1000, color="tab:blue", ls=":", lw=1.0,
+                        alpha=0.7, zorder=1, label="gate start")
+        if step_end_x is not None:
+            ax.axhline(step_end_x * 1000, color="tab:red", ls=":", lw=1.0,
+                        alpha=0.7, zorder=1, label="gate end")
+
         # Annotate min_window_vx for selected trials
         sel_annotations = []
         for tr in trial_rows:
             if tr["selected"] == "True":
-                vx_mw = float(tr["min_window_vx"]) * 1000.0  # m/s -> mm/s
-                sel_annotations.append(f"t{tr['trial']}: {vx_mw:.1f} mm/s")
-        annotation_text = "\n".join(sel_annotations)
-        ax.text(
-            0.97, 0.03, annotation_text,
-            transform=ax.transAxes, fontsize=7.5,
-            ha="right", va="bottom",
-            bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="0.7", alpha=0.85),
-        )
+                mwv_str = tr.get("min_window_vx", "")
+                if mwv_str:
+                    vx_mw = float(mwv_str) * 1000.0  # m/s -> mm/s
+                    sel_annotations.append(f"t{tr['trial']}: {vx_mw:.1f} mm/s")
+        if sel_annotations:
+            annotation_text = "\n".join(sel_annotations)
+            ax.text(
+                0.97, 0.03, annotation_text,
+                transform=ax.transAxes, fontsize=7.5,
+                ha="right", va="bottom",
+                bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="0.7", alpha=0.85),
+            )
 
         ax.set_title(ref_id, fontsize=10, fontweight="bold")
         ax.set_xlabel("Time (s)")
@@ -121,9 +137,28 @@ def main() -> None:
     for idx in range(nrefs, nrows * NCOLS):
         axes[idx // NCOLS][idx % NCOLS].set_visible(False)
 
-    fig.savefig(OUT_PATH, dpi=150)
-    print(f"Saved: {OUT_PATH}")
+    fig.savefig(out_path, dpi=150)
+    plt.close(fig)
+    print(f"  Trajectory overview: {out_path}")
+    return out_path
 
 
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) < 2:
+        print("Usage: uv run python -m analysis.plot_trajectories <run_dir>")
+        sys.exit(1)
+    run_dir = Path(sys.argv[1])
+    # Auto-detect spatial bounds from terrain type
+    step_start_x = None
+    step_end_x = None
+    name = run_dir.name
+    if "rough" in name:
+        from config_rough import FLAT_LEAD, _X_HALF
+        step_start_x = FLAT_LEAD
+        step_end_x = FLAT_LEAD + 2 * _X_HALF
+    elif "step" in name:
+        import importlib
+        config_mod = importlib.import_module("config_step")
+        step_start_x = getattr(config_mod, "STEP_START_X", None)
+        step_end_x = getattr(config_mod, "STEP_END_X", None)
+    plot_trajectory_overview(run_dir, step_start_x, step_end_x)

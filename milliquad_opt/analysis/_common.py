@@ -58,8 +58,25 @@ def detect_terrain(run_dir: pathlib.Path) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Pitch RMS
+# Pitch
 # ---------------------------------------------------------------------------
+
+def compute_pitch_series(traj: list[dict]) -> np.ndarray:
+    """Per-timestep pitch (degrees) from FL/BL leg body positions.
+
+    Yaw-invariant: uses horizontal distance sqrt(dx² + dy²) instead of
+    world-frame dx, so 180° yaw rotations don't register as pitch.
+    Result bounded to [-90, +90]°.
+    """
+    fl_pos = np.array([s["leg_xpos"][FL_IDX] for s in traj])
+    bl_pos = np.array([s["leg_xpos"][BL_IDX] for s in traj])
+
+    dx = fl_pos[:, 0] - bl_pos[:, 0]
+    dy = fl_pos[:, 1] - bl_pos[:, 1]
+    dz = fl_pos[:, 2] - bl_pos[:, 2]
+    d_horiz = np.sqrt(dx**2 + dy**2)
+    return np.degrees(np.arctan2(dz, d_horiz))
+
 
 def compute_pitch_rms(
     traj: list[dict],
@@ -69,18 +86,10 @@ def compute_pitch_rms(
 ) -> float:
     """Pitch amplitude RMS (degrees) from FL/BL leg body positions.
 
-    Uses geometric pitch: theta = arctan2(dz, dx) between front-left
-    and back-left legs. Unwrapped and detrended.
-
-    For flat/rough: time-gated after settle_time.
+    Yaw-invariant. For flat/rough: time-gated after settle_time.
     For step: spatially-gated between step_start_x and 90% of step_end_x.
     """
-    fl_pos = np.array([s["leg_xpos"][FL_IDX] for s in traj])
-    bl_pos = np.array([s["leg_xpos"][BL_IDX] for s in traj])
-
-    dx = fl_pos[:, 0] - bl_pos[:, 0]
-    dz = fl_pos[:, 2] - bl_pos[:, 2]
-    theta = np.degrees(np.unwrap(np.arctan2(dz, dx)))
+    theta = compute_pitch_series(traj)
 
     if step_start_x is not None and step_end_x is not None:
         cutoff_x = step_start_x + 0.9 * (step_end_x - step_start_x)
@@ -98,7 +107,7 @@ def compute_pitch_rms(
             return 0.0
         theta_active = theta[mask]
 
-    theta_active -= theta_active[0]  # detrend
+    theta_active = theta_active - theta_active[0]  # detrend
     return float(np.std(theta_active))
 
 

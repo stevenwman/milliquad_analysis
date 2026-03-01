@@ -2,7 +2,9 @@
 
 ## The Plot
 
-`plot_exp_vs_sim.py` produces a 2x2 figure: experimental (left) vs simulation (right) for flat (top) and step (bottom) terrains. Each panel shows forward velocity vs frequency with per-trial scatter dots and std shading bands.
+`plot_exp_vs_sim_composite.py` produces a 2×4 figure: rows = flat, step; col-pairs = [velocity exp|sim, pitch exp|sim]. Each panel shows per-trial scatter dots and std shading bands.
+
+Legacy standalone scripts (`plot_exp_vs_sim.py`, `plot_exp_vs_sim_pitch.py`) still exist but are superseded by the composite.
 
 ## Failure Modes: Two Categories
 
@@ -28,7 +30,7 @@ Scatter dots at failure frequencies are **stripped** (not shown). Only the X mar
 
 ## Wheel f50 Flat Sim Data
 
-Not in the original flat validation CSV (config_flat.py only has WR at f10/f20/f30). We ran 5 extra trials with the validate_params protocol (yaw jitter ±2°, BASE_SEED=99999, ref_idx=15) and appended to the CSV. Results: ~719 mm/s mean, COT ~0.41. Video in `results/20260228T013353_rk4_flat/wheel_f50_flat.mp4`.
+Now in `config_flat.py` REFERENCE_DATA as a failure mode (`speed=0, weight=0`). Runs natively through `validate_params` — no manual CSV patching needed. Results: ~719 mm/s mean, COT ~0.41, pitch_rms ~0.18° (stable, no tumbling).
 
 ## Shared Y-Axis
 
@@ -40,8 +42,10 @@ Plots show scatter dots + std shading only. No mean lines connecting the dots �
 
 ## Pitch Comparison (`plot_exp_vs_sim_pitch.py`)
 
-### f50 excluded from flat (same as velocity)
-Sim robots tumble at 50Hz (pitch RMS 65-83°), blowing up the y-axis. Experimental flat pitch at f50 is 8-17°. Both exp and sim f50 stripped from the flat pitch comparison.
+### Yaw-invariant pitch computation
+The original `compute_pitch_rms` measured pitch in the world XZ plane (`arctan2(dz, dx)` between FL and BL legs). When a robot yawed 180°, the FL-BL x-distance flipped sign, registering as ~180° "pitch" even though the robot never tilted. This caused false "inverted" detections at f50 (scene1: 65-83°, scene4: 83° — actually just yaw rotations, confirmed by video).
+
+Fix: `compute_pitch_series` now uses `arctan2(dz, sqrt(dx²+dy²))` — horizontal distance is always positive, so yaw rotations don't affect pitch. Result bounded to [-90, +90]°. After fix, all f50 trials show reasonable pitch (scene1: 12°, scene4: 3°). `PITCH_EXCLUDE` is empty — no frequency exclusions needed.
 
 ### Step pitch requires spatial gating
 `compute_pitch_rms` originally used only time-based gating (`settle_time`). On step terrain this included the cliff-fall at the end of the staircase, where the robot tumbles off and accumulates huge unwrapped rotation (40-500° RMS). Fix: added `step_start_x`/`step_end_x` spatial gating to `compute_pitch_rms` (same window as `compute_cot` and `extract_velocity`: step_start_x to 90% of step_end_x). After fix: 5-23° RMS, comparable to experimental 3-12°.
@@ -81,4 +85,49 @@ Current `config_step.py` REFERENCE_DATA was built from q75 (matches to <0.5%). S
 - Two outliers go UP: scene4 f10 (+7%) and wheel f30 (+3%) — different trajectory velocity profiles.
 - q60 stds are often higher (less stable window), especially scene2.
 - Pitch RMS barely changes between windowing methods (±5–15%, no systematic bias).
-- **If adopting q60**: all step REFERENCE_DATA targets must be updated. Sim-side spatial gating is unaffected.
+- **q60 adopted**: `config_step_q60.py` has updated targets. The `step_q60_rk-warm` run was optimized against q60 targets. `plot_exp_vs_sim_composite.py` uses `extract_step_q60()` / `extract_step_pitch_q60()` for experimental step panels. Original `config_step.py` still has q75 targets (legacy).
+
+**CRITICAL**: When comparing exp vs sim for step terrain, the experimental extraction windowing MUST match the config targets the sim was trained on. If the sim used q60 targets, the exp panel must use `extract_step_q60`, not `extract_step`. Mismatch introduces 10-23% systematic bias.
+
+---
+
+## Trial Validity Filtering
+
+### Gate-clearing criterion (rough/step)
+
+Trials on rough and step terrain are filtered by whether the robot reached the end of the terrain section (`max_x >= gate_end`). This replaces the old `min_window_vx` velocity threshold, which had false negatives (slow but completing robots like scene1_f10) and false positives (fast starts that stall mid-course).
+
+- **Rough**: `gate_end = 0.155m` (ROUGH_END_X from `config_rough_spatial.py`)
+- **Step**: `gate_end = 0.1015m` (STEP_END_X from `config_step.py`)
+- **Flat**: no gate — all trials pass the position check
+
+**Gate exemption**: `GATE_EXEMPT = {("scene1", 10.0)}` — scene1_f10 (1-leg @ 10Hz) successfully traverses rough terrain but moves too slowly to reach 155mm. All 5 trials top out at 101–122mm. Visually confirmed as valid locomotion, not stuck. Exempt from gate check on all terrains.
+
+The `max_x` column is computed natively by `validate_params.py` (`max(pos_x)` per trial) and written to all CSVs (flat included, though flat has no gate).
+
+Implementation: `_is_valid_trial(r, gate_end)` in `plot_validation.py`. `GATE_END` dict maps terrain → threshold. `GATE_EXEMPT` set of `(scene, freq)` tuples bypass gate check.
+
+### Inverted pitch check (all terrains)
+
+Trials with `pitch_rms > 30°` are excluded regardless of terrain. This catches robots that flip over.
+
+### "All failed" X markers
+
+When ALL selected trials for a (scene, freq) combo are invalid (didn't clear gate OR inverted), a scene-colored X is placed at y=0 on plots. This distinguishes "no data because all trials failed" from "data point not shown because it's off-screen".
+
+### Flat terrain: no filtering needed in practice
+
+Flat trials all pass both checks (no gate, no inversions). WR f50 pitch_rms is ~0.18° (stable).
+
+---
+
+## Script Inventory
+
+| Script | Purpose | Status |
+|--------|---------|--------|
+| `plot_validation.py` | Sim-only: velocity/COT/pitch per terrain + 3×3 composite | **Primary** |
+| `plot_exp_vs_sim_composite.py` | Exp vs sim: 2×4 (flat+step × vel+pitch × exp+sim) | **Primary** |
+| `plot_exp_vs_sim.py` | Exp vs sim velocity only (old 2×2) | Legacy |
+| `plot_exp_vs_sim_pitch.py` | Exp vs sim pitch only (old 2×2) | Legacy |
+
+All primary scripts import from `plot_validation.py` for shared utilities (`plot_panel`, `build_plot_data`, `build_all_failed_freqs`, `GATE_END`, etc.).

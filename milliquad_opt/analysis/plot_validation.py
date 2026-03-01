@@ -55,16 +55,31 @@ def load_validation_csv(csv_path: pathlib.Path) -> list[dict]:
                 "crash": row["crash"] == "True",
                 "selected": row["selected"] == "True",
                 "min_window_vx": float(row["min_window_vx"]) if row.get("min_window_vx") else 0.0,
+                "max_x": float(row["max_x"]) if row.get("max_x") else None,
                 "pitch_rms": float(row["pitch_rms"]) if row.get("pitch_rms") else None,
                 "stalled": row.get("stalled", "False") == "True",
             })
     return rows
 
 
+def _is_valid_trial(r: dict, gate_end: float | None = None) -> bool:
+    """A trial is valid if it cleared the gate (rough/step) AND isn't inverted.
+
+    gate_end: required x position for rough/step terrain (None for flat = always passes).
+    """
+    if gate_end is not None and r["max_x"] is not None:
+        if (r["scene"], r["freq"]) not in GATE_EXEMPT and r["max_x"] < gate_end:
+            return False
+    inverted = r["pitch_rms"] is not None and r["pitch_rms"] > INVERTED_PITCH_THRESHOLD
+    return not inverted
+
+
 def build_plot_data(rows: list[dict], metric: str,
                     min_vx: float | None = None,
                     selected_only: bool = False,
-                    exclude_stalled: bool = False) -> dict:
+                    exclude_stalled: bool = False,
+                    exclude_invalid: bool = False,
+                    gate_end: float | None = None) -> dict:
     """Group trials by scene.
 
     Returns {scene: {freqs, trials, mean_freqs, means, stds}}.
@@ -73,12 +88,16 @@ def build_plot_data(rows: list[dict], metric: str,
     min_vx: if set, exclude trials with vx below this (m/s).
     selected_only: if True, use only selected=True trials (top 3 by vel error).
     exclude_stalled: if True, exclude trials flagged as stalled (5-period window).
+    exclude_invalid: if True, exclude trials that didn't clear gate or are inverted.
+    gate_end: x position threshold for gate-clearing (rough/step). None for flat.
     """
     valid = [r for r in rows if not r["crash"]]
     if selected_only:
         valid = [r for r in valid if r.get("selected", False)]
     if exclude_stalled:
         valid = [r for r in valid if not r.get("stalled", False)]
+    if exclude_invalid:
+        valid = [r for r in valid if _is_valid_trial(r, gate_end)]
     if min_vx is not None:
         valid = [r for r in valid if r["vx"] is not None and abs(r["vx"]) >= min_vx]
 
@@ -121,6 +140,53 @@ def build_plot_data(rows: list[dict], metric: str,
     return data
 
 
+INVERTED_PITCH_THRESHOLD = 30.0  # degrees — pitch_rms above this = inverted
+GATE_END = {"rough": 0.155, "step": 0.1015}  # m — robot must reach this x to count as valid
+
+# scene1_f10 on rough: robot traverses terrain successfully but moves too slowly (1-leg @ 10Hz)
+# to reach ROUGH_END_X. Exempt from gate check per visual inspection.
+GATE_EXEMPT = {("scene1", 10.0)}
+
+# Frequencies to exclude from pitch plots. Empty = show all.
+# Inverted trials (pitch_rms > 30°) are already excluded by exclude_invalid.
+PITCH_EXCLUDE: dict[str, list[float]] = {}
+
+
+def strip_freqs(data: dict, freqs_to_remove: list[float]):
+    """Remove specific frequencies from plot data (in-place)."""
+    for scene in data:
+        d = data[scene]
+        keep = [j for j, f in enumerate(d["freqs"]) if f not in freqs_to_remove]
+        d["freqs"] = [d["freqs"][j] for j in keep]
+        d["trials"] = [d["trials"][j] for j in keep]
+        keep_m = [j for j, f in enumerate(d["mean_freqs"]) if f not in freqs_to_remove]
+        d["mean_freqs"] = [d["mean_freqs"][j] for j in keep_m]
+        d["means"] = [d["means"][j] for j in keep_m]
+        d["stds"] = [d["stds"][j] for j in keep_m]
+
+
+def build_all_failed_freqs(rows: list[dict],
+                           selected_only: bool = False,
+                           gate_end: float | None = None) -> dict[str, list[float]]:
+    """Find (scene, freq) combos where ALL trials are invalid (didn't clear gate or inverted).
+
+    Returns {scene: [freq1, freq2, ...]} for use as X markers on plots.
+    """
+    valid = [r for r in rows if not r["crash"]]
+    if selected_only:
+        valid = [r for r in valid if r.get("selected", False)]
+
+    failed: dict[str, list[float]] = {}
+    for scene in PLOT_ORDER:
+        scene_rows = [r for r in valid if r["scene"] == scene]
+        freqs = sorted(set(r["freq"] for r in scene_rows))
+        for freq in freqs:
+            freq_rows = [r for r in scene_rows if r["freq"] == freq]
+            if freq_rows and all(not _is_valid_trial(r, gate_end) for r in freq_rows):
+                failed.setdefault(scene, []).append(freq)
+    return failed
+
+
 def get_failure_modes(terrain: str) -> dict[str, list[float]]:
     """Get failure mode refs (target=0) from terrain config."""
     config_mod = importlib.import_module(f"config_{terrain}")
@@ -137,8 +203,14 @@ def plot_panel(
     title: str,
     ylabel: str,
     failures: dict[str, list[float]] | None = None,
+    all_failed: dict[str, list[float]] | None = None,
 ):
-    """Plot one terrain panel with shaded std bands and scatter dots."""
+    """Plot one terrain panel with shaded std bands and scatter dots.
+
+    failures: (scene, freq) where target=0 (experimental failure mode). X at y=0.
+    all_failed: (scene, freq) where ALL selected trials are invalid (stalled/inverted).
+        X at y=0, colored by scene.
+    """
     n = len(PLOT_ORDER)
     dodge_width = 1.2  # total spread in Hz
     for idx, scene in enumerate(PLOT_ORDER):
@@ -157,8 +229,19 @@ def plot_panel(
         scatter_freqs = np.array(d["freqs"]) + dx
         ax.scatter(scatter_freqs, d["trials"], color=COLORS[scene], alpha=0.6, s=30, zorder=3)
 
+    # X markers for target=0 failure modes
     if failures:
         for scene, freqs in failures.items():
+            if scene in COLORS:
+                for freq in freqs:
+                    ax.plot(
+                        freq, 0, "x", color=COLORS[scene],
+                        markersize=10, markeredgewidth=2.5, zorder=5,
+                    )
+
+    # X markers for all-invalid (scene, freq) combos
+    if all_failed:
+        for scene, freqs in all_failed.items():
             if scene in COLORS:
                 for freq in freqs:
                     ax.plot(
@@ -174,6 +257,9 @@ def plot_panel(
     all_freqs = set(f for d in data.values() for f in d["mean_freqs"])
     if failures:
         for freqs in failures.values():
+            all_freqs.update(freqs)
+    if all_failed:
+        for freqs in all_failed.values():
             all_freqs.update(freqs)
     all_freqs_sorted = sorted(all_freqs)
     if all_freqs_sorted:
@@ -214,12 +300,13 @@ def main():
     # Generate separate figures per terrain (each run_dir has different params)
     for terrain, rows, run_dir in entries:
         title = TERRAIN_TITLES.get(terrain, terrain.replace("_", " ").title())
-        failures = get_failure_modes(terrain)
+        ge = GATE_END.get(terrain)
+        all_failed = build_all_failed_freqs(rows, selected_only=True, gate_end=ge)
 
         # Velocity
         fig_v, ax_v = plt.subplots(figsize=(7, 5))
-        vx_data = build_plot_data(rows, "vx", selected_only=True)
-        plot_panel(ax_v, vx_data, title, "Forward Velocity (mm/s)", failures)
+        vx_data = build_plot_data(rows, "vx", selected_only=True, exclude_invalid=True, gate_end=ge)
+        plot_panel(ax_v, vx_data, title, "Forward Velocity (mm/s)", all_failed=all_failed)
         ax_v.legend(loc="upper left", fontsize=12, framealpha=0.9)
         fig_v.tight_layout()
         vel_path = output_dir / f"velocity_vs_freq_{terrain}.png"
@@ -227,16 +314,69 @@ def main():
         print(f"Saved: {vel_path}")
         plt.close(fig_v)
 
-        # COT — filter out stalled trials (5-period sustained velocity check)
+        # COT
         fig_c, ax_c = plt.subplots(figsize=(7, 5))
-        cot_data = build_plot_data(rows, "cot", selected_only=True, exclude_stalled=True)
-        plot_panel(ax_c, cot_data, title, "Cost of Transport")
+        cot_data = build_plot_data(rows, "cot", selected_only=True, exclude_invalid=True, gate_end=ge)
+        plot_panel(ax_c, cot_data, title, "Cost of Transport", all_failed=all_failed)
         ax_c.legend(loc="upper left", fontsize=12, framealpha=0.9)
         fig_c.tight_layout()
         cot_path = output_dir / f"cot_vs_freq_{terrain}.png"
         fig_c.savefig(cot_path, dpi=150, bbox_inches="tight")
         print(f"Saved: {cot_path}")
         plt.close(fig_c)
+
+        # Pitch RMS
+        fig_p, ax_p = plt.subplots(figsize=(7, 5))
+        pitch_data = build_plot_data(rows, "pitch_rms", selected_only=True, exclude_invalid=True, gate_end=ge)
+        pitch_excl = PITCH_EXCLUDE.get(terrain, [])
+        if pitch_excl:
+            strip_freqs(pitch_data, pitch_excl)
+        plot_panel(ax_p, pitch_data, title, "Pitch Amplitude RMS (\u00b0)", all_failed=all_failed)
+        ax_p.legend(loc="upper left", fontsize=12, framealpha=0.9)
+        fig_p.tight_layout()
+        pitch_path = output_dir / f"pitch_vs_freq_{terrain}.png"
+        fig_p.savefig(pitch_path, dpi=150, bbox_inches="tight")
+        print(f"Saved: {pitch_path}")
+        plt.close(fig_p)
+
+    # Composite 3×3 if multiple terrains provided
+    if len(entries) > 1:
+        metrics = [
+            ("vx", "Forward Velocity (mm/s)"),
+            ("cot", "Cost of Transport"),
+            ("pitch_rms", "Pitch Amplitude RMS (\u00b0)"),
+        ]
+        n_rows = len(entries)
+        n_cols = len(metrics)
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(6 * n_cols, 4.5 * n_rows),
+                                 squeeze=False)
+
+        for i, (terrain, rows, _) in enumerate(entries):
+            title_t = TERRAIN_TITLES.get(terrain, terrain.replace("_", " ").title())
+            ge = GATE_END.get(terrain)
+            all_failed = build_all_failed_freqs(rows, selected_only=True, gate_end=ge)
+            for j, (metric, ylabel) in enumerate(metrics):
+                pdata = build_plot_data(rows, metric, selected_only=True, exclude_invalid=True, gate_end=ge)
+                if metric == "pitch_rms":
+                    pitch_excl = PITCH_EXCLUDE.get(terrain, [])
+                    if pitch_excl:
+                        strip_freqs(pdata, pitch_excl)
+                panel_title = f"{title_t}: {ylabel}"
+                plot_panel(axes[i, j], pdata, panel_title, ylabel, all_failed=all_failed)
+
+        # Single legend from top-left
+        handles, labels = axes[0, 0].get_legend_handles_labels()
+        axes[0, 0].legend(handles, labels, loc="upper left", fontsize=10, framealpha=0.9)
+        for ax in axes.flat:
+            leg = ax.get_legend()
+            if leg and ax is not axes[0, 0]:
+                leg.remove()
+
+        fig.tight_layout()
+        comp_path = output_dir / "sim_composite.png"
+        fig.savefig(comp_path, dpi=150, bbox_inches="tight")
+        print(f"Saved: {comp_path}")
+        plt.close(fig)
 
     if not args.no_show:
         plt.show()
