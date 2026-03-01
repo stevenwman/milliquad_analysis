@@ -48,6 +48,27 @@ def _remap_exp_data(exp_data: dict) -> dict:
     return {_MORPH_TO_SCENE[m]: exp_data[m] for m in exp_data if m in _MORPH_TO_SCENE}
 
 
+# Frequencies to exclude from comparison (same as velocity: f50 excluded from flat)
+_EXCLUDE_FREQS: dict[str, list[float]] = {
+    "flat": [50.0],
+}
+
+
+def _strip_freqs(data: dict, freqs_to_remove: list[float]):
+    """Remove specified frequencies from plot data (both scatter and summary)."""
+    for scene in data:
+        d = data[scene]
+        # Strip scatter points
+        keep = [j for j, f in enumerate(d["freqs"]) if f not in freqs_to_remove]
+        d["freqs"] = [d["freqs"][j] for j in keep]
+        d["trials"] = [d["trials"][j] for j in keep]
+        # Strip summary stats
+        keep_m = [j for j, f in enumerate(d["mean_freqs"]) if f not in freqs_to_remove]
+        d["mean_freqs"] = [d["mean_freqs"][j] for j in keep_m]
+        d["means"] = [d["means"][j] for j in keep_m]
+        d["stds"] = [d["stds"][j] for j in keep_m]
+
+
 def main():
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -86,13 +107,19 @@ def main():
     for i, (terrain, rows, _) in enumerate(entries):
         title = TERRAIN_TITLES.get(terrain, terrain.title())
 
+        exclude = _EXCLUDE_FREQS.get(terrain, [])
+
         # Left: experimental
         exp_raw = exp_extractors[terrain]()
         exp_data = _remap_exp_data(exp_raw)
+        if exclude:
+            _strip_freqs(exp_data, exclude)
         plot_panel(axes[i, 0], exp_data, f"{title}: Experimental", ylabel)
 
         # Right: simulation
         sim_data = build_plot_data(rows, "pitch_rms", selected_only=True)
+        if exclude:
+            _strip_freqs(sim_data, exclude)
         plot_panel(axes[i, 1], sim_data, f"{title}: Simulation", ylabel)
 
         # Share y-axis range per row
