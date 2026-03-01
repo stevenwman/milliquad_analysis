@@ -45,3 +45,40 @@ Sim robots tumble at 50Hz (pitch RMS 65-83°), blowing up the y-axis. Experiment
 
 ### Step pitch requires spatial gating
 `compute_pitch_rms` originally used only time-based gating (`settle_time`). On step terrain this included the cliff-fall at the end of the staircase, where the robot tumbles off and accumulates huge unwrapped rotation (40-500° RMS). Fix: added `step_start_x`/`step_end_x` spatial gating to `compute_pitch_rms` (same window as `compute_cot` and `extract_velocity`: step_start_x to 90% of step_end_x). After fix: 5-23° RMS, comparable to experimental 3-12°.
+
+## Experimental Step Data Windowing (q60 vs q75)
+
+Experimental step terrain data has two windowing methods. Both only apply to **experimental** data — simulation uses spatial gating (`step_start_x` to 90% of `step_end_x`) which is terrain-absolute and more robust.
+
+### Original windowing
+- **Velocity**: q75 ± 150 fixed samples — center at 75% of recording, ±150 samples window. Matches `config_step.py` targets.
+- **Pitch**: 50%–90% of recording — skip first half (transient) and last 10% (cliff-fall).
+
+### q60 windowing (student's method)
+- 30% window centered at 60% of recording: indices 45%–75%.
+- Trajectory-relative — adapts to different trial lengths/speeds (unlike q75±150 which is absolute sample count).
+- Functions: `extract_step_q60()` in `plot_velocity_vs_freq.py`, `extract_step_pitch_q60()` in `plot_pitch_vs_freq.py`.
+- Old functions preserved alongside new ones (`extract_step()` / `extract_step_pitch()` unchanged).
+
+### q60 vs q75 velocity impact on optimization targets
+
+Current `config_step.py` REFERENCE_DATA was built from q75 (matches to <0.5%). Switching to q60 shifts most targets:
+
+| Scene | Freq | q75 (mm/s) | q60 (mm/s) | Shift |
+|-------|------|-----------|-----------|-------|
+| scene1 | 10 | 19.9 | 16.9 | -15% |
+| scene1 | 20 | 47.3 | 46.2 | -2% |
+| scene1 | 30 | 33.1 | 27.9 | -16% |
+| scene2 | 10 | 54.2 | 41.5 | -23% |
+| scene2 | 20 | 89.5 | 83.5 | -7% |
+| scene2 | 30 | 134.1 | 109.8 | -18% |
+| scene4 | 10 | 71.6 | 76.9 | +7% |
+| scene4 | 20 | 104.2 | 96.3 | -8% |
+| scene4 | 30 | 90.0 | 76.4 | -15% |
+| wheel | 30 | 94.0 | 97.2 | +3% |
+
+- Most conditions drop 10–23% (q60 window is earlier → robot still accelerating on steps).
+- Two outliers go UP: scene4 f10 (+7%) and wheel f30 (+3%) — different trajectory velocity profiles.
+- q60 stds are often higher (less stable window), especially scene2.
+- Pitch RMS barely changes between windowing methods (±5–15%, no systematic bias).
+- **If adopting q60**: all step REFERENCE_DATA targets must be updated. Sim-side spatial gating is unaffected.

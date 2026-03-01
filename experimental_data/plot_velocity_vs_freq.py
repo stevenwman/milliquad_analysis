@@ -52,6 +52,16 @@ def _step_vx_q75(csv_name: str) -> float:
     return float(np.nanmean(vx[lo:hi]))
 
 
+def _step_vx_q60(csv_name: str) -> float:
+    """Per-trial velocity using 30% window centered at 60% (indices 45%–75%)."""
+    dat = _load(csv_name)
+    vx = 0.5 * ((-dat[:, 3] * MM_SCALE) + (-dat[:, 7] * MM_SCALE))
+    n = len(vx)
+    lo = int(0.45 * n)
+    hi = int(0.75 * n)
+    return float(np.nanmean(vx[lo:hi]))
+
+
 # ── Flat terrain condition definitions (from flat_pipeline.py) ──
 # fmt: off
 FLAT_CONDITIONS = [
@@ -138,6 +148,22 @@ def extract_step():
     for freq, morph, files, idx in STEP_CONDITIONS:
         trial_files = [files[i - 1] for i in idx]
         vels = [_step_vx_q75(f) for f in trial_files]
+        data[morph]["freqs"].extend([freq] * len(vels))
+        data[morph]["trials"].extend(vels)
+        data[morph]["mean_freqs"].append(freq)
+        data[morph]["means"].append(np.mean(vels))
+        data[morph]["stds"].append(np.std(vels, ddof=1) if len(vels) > 1 else 0.0)
+
+    return data
+
+
+def extract_step_q60():
+    """Step velocity using 30% window centered at 60% (indices 45%–75%)."""
+    data = {m: {"freqs": [], "trials": [], "mean_freqs": [], "means": [], "stds": []} for m in COLORS}
+
+    for freq, morph, files, idx in STEP_CONDITIONS:
+        trial_files = [files[i - 1] for i in idx]
+        vels = [_step_vx_q60(f) for f in trial_files]
         data[morph]["freqs"].extend([freq] * len(vels))
         data[morph]["trials"].extend(vels)
         data[morph]["mean_freqs"].append(freq)

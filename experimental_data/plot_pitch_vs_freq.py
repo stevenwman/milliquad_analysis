@@ -98,6 +98,21 @@ def _step_pitch_rms(csv_name: str) -> float:
     return float(np.std(theta_ss))
 
 
+def _step_pitch_rms_q60(csv_name: str) -> float:
+    """RMS pitch amplitude using 30% window centered at 60% (indices 45%–75%)."""
+    dat = _load(csv_name)
+    theta_col = _body_theta_col(csv_name)
+    theta = dat[:, theta_col]
+    n = len(theta)
+    lo = int(0.45 * n)
+    hi = int(0.75 * n)
+    theta_ss = theta[lo:hi]
+    theta_ss = theta_ss[~np.isnan(theta_ss)]
+    if len(theta_ss) < 10:
+        return 0.0
+    return float(np.std(theta_ss))
+
+
 # ── Condition definitions (same as velocity) ──
 # fmt: off
 FLAT_CONDITIONS = [
@@ -179,6 +194,22 @@ def extract_step_pitch():
     for freq, morph, files, idx in STEP_CONDITIONS:
         trial_files = [files[i - 1] for i in idx]
         vals = [_step_pitch_rms(f) for f in trial_files]
+        data[morph]["freqs"].extend([freq] * len(vals))
+        data[morph]["trials"].extend(vals)
+        data[morph]["mean_freqs"].append(freq)
+        data[morph]["means"].append(np.mean(vals))
+        data[morph]["stds"].append(np.std(vals, ddof=1) if len(vals) > 1 else 0.0)
+
+    return data
+
+
+def extract_step_pitch_q60():
+    """Step pitch using 30% window centered at 60% (indices 45%–75%)."""
+    data = {m: {"freqs": [], "trials": [], "mean_freqs": [], "means": [], "stds": []} for m in COLORS}
+
+    for freq, morph, files, idx in STEP_CONDITIONS:
+        trial_files = [files[i - 1] for i in idx]
+        vals = [_step_pitch_rms_q60(f) for f in trial_files]
         data[morph]["freqs"].extend([freq] * len(vals))
         data[morph]["trials"].extend(vals)
         data[morph]["mean_freqs"].append(freq)

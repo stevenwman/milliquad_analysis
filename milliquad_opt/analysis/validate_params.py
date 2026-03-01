@@ -146,8 +146,15 @@ def main():
             config_mod.REFERENCE_DATA, MJCF_PATHS,
         )
 
-    step_start_x = getattr(config_mod, "STEP_START_X", None) if is_step else None
-    step_end_x = getattr(config_mod, "STEP_END_X", None) if is_step else None
+    if is_step:
+        step_start_x = getattr(config_mod, "STEP_START_X", None)
+        step_end_x = getattr(config_mod, "STEP_END_X", None)
+    elif is_rough:
+        step_start_x = config_mod.FLAT_LEAD
+        step_end_x = config_mod.FLAT_LEAD + 2 * config_mod._X_HALF
+    else:
+        step_start_x = None
+        step_end_x = None
 
     if is_rough:
         y_jitter = config_mod.Y_JITTER
