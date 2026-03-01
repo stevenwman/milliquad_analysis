@@ -44,7 +44,7 @@ DATA = {
         "color": "#D81B60",
         "trials": {
             10: [None, None, None, 81.25, None],
-            30: [None, 123.8, None, 178.08, 160.49],
+            30: [None, None, None, 178.08, 160.49],
             50: [None, None, None, None, 180.56],
         },
     },

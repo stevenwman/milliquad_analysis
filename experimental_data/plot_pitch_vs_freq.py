@@ -191,14 +191,18 @@ def extract_step_pitch():
 # ── Plotting ──
 
 def plot_pitch(ax, data, title):
-    for morph in ("leg", "2leg", "4leg", "wheel"):
+    morphs = ("leg", "2leg", "4leg", "wheel")
+    n = len(morphs)
+    dodge_width = 1.2
+    for idx, morph in enumerate(morphs):
         d = data[morph]
         if not d["mean_freqs"]:
             continue
-        freqs_scatter = np.array(d["freqs"], dtype=float)
+        dx = (idx - (n - 1) / 2) * (dodge_width / (n - 1))
+        freqs_scatter = np.array(d["freqs"], dtype=float) + dx
         mean = np.array(d["means"])
         std = np.array(d["stds"])
-        freq_arr = np.array(d["mean_freqs"])
+        freq_arr = np.array(d["mean_freqs"], dtype=float) + dx
         ax.fill_between(freq_arr, mean - std, mean + std, color=COLORS[morph], alpha=0.2, label=LABELS[morph])
         ax.scatter(freqs_scatter, d["trials"], color=COLORS[morph], alpha=0.6, s=30, zorder=3)
     ax.set_xlabel("Frequency (Hz)")
@@ -210,49 +214,54 @@ def plot_pitch(ax, data, title):
 
 # ── Main ──
 
-flat_pitch = extract_flat_pitch()
-step_pitch = extract_step_pitch()
+def main():
+    flat_pitch = extract_flat_pitch()
+    step_pitch = extract_step_pitch()
 
-# Print summary tables
-for terrain, pdata in [("FLAT", flat_pitch), ("STEP", step_pitch)]:
-    print(f"\n{terrain}:")
-    deg = "\u00b0"
-    print(f"{'Morph':<8} {'Freq':<6} {f'Mean ({deg})':<10} {f'Std ({deg})':<10} {'N':>3}")
-    print("-" * 40)
-    for morph in ("leg", "2leg", "4leg", "wheel"):
-        d = pdata[morph]
-        for i, freq in enumerate(d["mean_freqs"]):
-            n = sum(1 for f in d["freqs"] if f == freq)
-            print(f"{morph:<8} {freq:<6.0f} {d['means'][i]:<10.2f} {d['stds'][i]:<10.2f} {n:>3}")
+    # Print summary tables
+    for terrain, pdata in [("FLAT", flat_pitch), ("STEP", step_pitch)]:
+        print(f"\n{terrain}:")
+        deg = "\u00b0"
+        print(f"{'Morph':<8} {'Freq':<6} {f'Mean ({deg})':<10} {f'Std ({deg})':<10} {'N':>3}")
+        print("-" * 40)
+        for morph in ("leg", "2leg", "4leg", "wheel"):
+            d = pdata[morph]
+            for i, freq in enumerate(d["mean_freqs"]):
+                n = sum(1 for f in d["freqs"] if f == freq)
+                print(f"{morph:<8} {freq:<6.0f} {d['means'][i]:<10.2f} {d['stds'][i]:<10.2f} {n:>3}")
 
-# ── Individual flat plot (keep existing output) ──
-fig_flat, ax_flat = plt.subplots(figsize=(7, 5))
-plot_pitch(ax_flat, flat_pitch, "Flat Terrain: Pitch Amplitude vs Frequency")
-ax_flat.set_xticks([10, 20, 30, 50])
-ax_flat.set_xlim(5, 55)
-fig_flat.tight_layout()
-fig_flat.savefig("experimental_data/plots/pitch_vs_freq_flat.png", dpi=150)
+    # ── Individual flat plot (keep existing output) ──
+    fig_flat, ax_flat = plt.subplots(figsize=(7, 5))
+    plot_pitch(ax_flat, flat_pitch, "Flat Terrain: Pitch Amplitude vs Frequency")
+    ax_flat.set_xticks([10, 20, 30, 50])
+    ax_flat.set_xlim(5, 55)
+    fig_flat.tight_layout()
+    fig_flat.savefig("experimental_data/plots/pitch_vs_freq_flat.png", dpi=150)
 
-# ── Combined vertical stack: flat + step ──
-fig_both, (ax_top, ax_bot) = plt.subplots(2, 1, figsize=(7, 7.2))
+    # ── Combined vertical stack: flat + step ──
+    fig_both, (ax_top, ax_bot) = plt.subplots(2, 1, figsize=(7, 7.2))
 
-plot_pitch(ax_top, flat_pitch, "Flat Terrain")
-ax_top.set_xticks([10, 20, 30, 50])
-ax_top.set_xlim(7, 53)
+    plot_pitch(ax_top, flat_pitch, "Flat Terrain")
+    ax_top.set_xticks([10, 20, 30, 50])
+    ax_top.set_xlim(7, 53)
 
-plot_pitch(ax_bot, step_pitch, "Step Terrain")
-ax_bot.set_xticks([10, 20, 30])
-ax_bot.set_xlim(7, 33)
+    plot_pitch(ax_bot, step_pitch, "Step Terrain")
+    ax_bot.set_xticks([10, 20, 30])
+    ax_bot.set_xlim(7, 33)
 
-# Single legend on top panel
-handles, labels = ax_top.get_legend_handles_labels()
-ax_top.get_legend().remove()
-ax_bot.get_legend().remove()
-ax_top.legend(handles, labels, loc="upper left", fontsize=12, framealpha=0.9)
+    # Single legend on top panel
+    handles, labels = ax_top.get_legend_handles_labels()
+    ax_top.get_legend().remove()
+    ax_bot.get_legend().remove()
+    ax_top.legend(handles, labels, loc="upper left", fontsize=12, framealpha=0.9)
 
-fig_both.tight_layout()
-fig_both.savefig("experimental_data/plots/pitch_flat_vs_step.png", dpi=150, bbox_inches="tight")
+    fig_both.tight_layout()
+    fig_both.savefig("experimental_data/plots/pitch_flat_vs_step.png", dpi=150, bbox_inches="tight")
 
-print(f"\nSaved: experimental_data/plots/pitch_vs_freq_flat.png")
-print(f"Saved: experimental_data/plots/pitch_flat_vs_step.png")
-plt.show()
+    print(f"\nSaved: experimental_data/plots/pitch_vs_freq_flat.png")
+    print(f"Saved: experimental_data/plots/pitch_flat_vs_step.png")
+    plt.show()
+
+
+if __name__ == "__main__":
+    main()

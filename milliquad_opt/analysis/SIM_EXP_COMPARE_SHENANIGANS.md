@@ -37,3 +37,11 @@ Each row shares y-axis limits between exp and sim panels for fair visual compari
 ## No Mean Lines
 
 Plots show scatter dots + std shading only. No mean lines connecting the dots — matches the experimental plot style. The shading band implicitly shows where the mean is (center of the band).
+
+## Pitch Comparison (`plot_exp_vs_sim_pitch.py`)
+
+### f50 excluded from flat (same as velocity)
+Sim robots tumble at 50Hz (pitch RMS 65-83°), blowing up the y-axis. Experimental flat pitch at f50 is 8-17°. Both exp and sim f50 stripped from the flat pitch comparison.
+
+### Step pitch requires spatial gating
+`compute_pitch_rms` originally used only time-based gating (`settle_time`). On step terrain this included the cliff-fall at the end of the staircase, where the robot tumbles off and accumulates huge unwrapped rotation (40-500° RMS). Fix: added `step_start_x`/`step_end_x` spatial gating to `compute_pitch_rms` (same window as `compute_cot` and `extract_velocity`: step_start_x to 90% of step_end_x). After fix: 5-23° RMS, comparable to experimental 3-12°.

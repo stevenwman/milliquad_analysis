@@ -150,14 +150,18 @@ def extract_step():
 # ── Plotting ──
 
 def plot_terrain(ax, data, title):
-    for morph in ("leg", "2leg", "4leg", "wheel"):
+    morphs = ("leg", "2leg", "4leg", "wheel")
+    n = len(morphs)
+    dodge_width = 1.2  # total spread in Hz
+    for idx, morph in enumerate(morphs):
         d = data[morph]
         if not d["mean_freqs"]:
             continue
-        freqs_scatter = np.array(d["freqs"], dtype=float) + JITTER[morph]
+        dx = (idx - (n - 1) / 2) * (dodge_width / (n - 1))
+        freqs_scatter = np.array(d["freqs"], dtype=float) + dx
         mean = np.array(d["means"])
         std = np.array(d["stds"])
-        freq_arr = np.array(d["mean_freqs"])
+        freq_arr = np.array(d["mean_freqs"], dtype=float) + dx
         ax.fill_between(freq_arr, mean - std, mean + std, color=COLORS[morph], alpha=0.2, label=LABELS[morph])
         ax.scatter(freqs_scatter, d["trials"], color=COLORS[morph], alpha=0.6, s=30, zorder=3)
     ax.set_xlabel("Frequency (Hz)")
@@ -169,112 +173,117 @@ def plot_terrain(ax, data, title):
 
 # ── Main ──
 
-flat_data = extract_flat()
-step_data = extract_step()
+def main():
+    flat_data = extract_flat()
+    step_data = extract_step()
 
-# Pop wheel 50Hz gentle mean, replace with failure (0) so shading tapers to 0
-wheel_50_mean = flat_data["wheel"]["means"].pop()  # last entry = 50Hz
-flat_data["wheel"]["mean_freqs"].pop()
-flat_data["wheel"]["stds"].pop()
-# Re-add 50Hz as failure mode → shading collapses to 0
-flat_data["wheel"]["mean_freqs"].append(50)
-flat_data["wheel"]["means"].append(0.0)
-flat_data["wheel"]["stds"].append(0.0)
+    # Pop wheel 50Hz gentle mean, replace with failure (0) so shading tapers to 0
+    wheel_50_mean = flat_data["wheel"]["means"].pop()  # last entry = 50Hz
+    flat_data["wheel"]["mean_freqs"].pop()
+    flat_data["wheel"]["stds"].pop()
+    # Re-add 50Hz as failure mode → shading collapses to 0
+    flat_data["wheel"]["mean_freqs"].append(50)
+    flat_data["wheel"]["means"].append(0.0)
+    flat_data["wheel"]["stds"].append(0.0)
 
-# Flat plot
-fig_flat, ax_flat = plt.subplots(figsize=(7, 5))
-plot_terrain(ax_flat, flat_data, "Flat Terrain: Velocity vs Frequency")
+    # Flat plot
+    fig_flat, ax_flat = plt.subplots(figsize=(7, 5))
+    plot_terrain(ax_flat, flat_data, "Flat Terrain: Velocity vs Frequency")
 
-# Wheel 50 Hz: dashed branch up to gentle actuation mean
-wc = COLORS["wheel"]
-ax_flat.plot([30, 50], [flat_data["wheel"]["means"][-2], wheel_50_mean], "--", color=wc, linewidth=1.5)
-ax_flat.plot(50, wheel_50_mean, "^", color=wc, markersize=8, zorder=5)
-# X marker at failure point
-ax_flat.plot(50, 0, "x", color=wc, markersize=10, markeredgewidth=2.5, zorder=5)
-ax_flat.set_xticks([10, 20, 30, 50])
-ax_flat.set_xlim(5, 55)
-fig_flat.tight_layout()
-fig_flat.savefig("experimental_data/plots/velocity_vs_freq_flat.png", dpi=150)
+    # Wheel 50 Hz: dashed branch up to gentle actuation mean
+    wc = COLORS["wheel"]
+    ax_flat.plot([30, 50], [flat_data["wheel"]["means"][-2], wheel_50_mean], "--", color=wc, linewidth=1.5)
+    ax_flat.plot(50, wheel_50_mean, "^", color=wc, markersize=8, zorder=5)
+    # X marker at failure point
+    ax_flat.plot(50, 0, "x", color=wc, markersize=10, markeredgewidth=2.5, zorder=5)
+    ax_flat.set_xticks([10, 20, 30, 50])
+    ax_flat.set_xlim(5, 55)
+    fig_flat.tight_layout()
+    fig_flat.savefig("experimental_data/plots/velocity_vs_freq_flat.png", dpi=150)
 
-# Clean version: no dashed branch, no 50Hz wheel scatter/markers
-flat_data_clean = extract_flat()
-# Pop 50Hz wheel entirely (shading + scatter)
-flat_data_clean["wheel"]["means"].pop()
-flat_data_clean["wheel"]["mean_freqs"].pop()
-flat_data_clean["wheel"]["stds"].pop()
-# Remove 50Hz wheel scatter points
-wf = flat_data_clean["wheel"]
-keep = [i for i, f in enumerate(wf["freqs"]) if f != 50]
-wf["freqs"] = [wf["freqs"][i] for i in keep]
-wf["trials"] = [wf["trials"][i] for i in keep]
-# Re-add 50Hz as failure (shading tapers to 0, no scatter)
-wf["mean_freqs"].append(50)
-wf["means"].append(0.0)
-wf["stds"].append(0.0)
+    # Clean version: no dashed branch, no 50Hz wheel scatter/markers
+    flat_data_clean = extract_flat()
+    # Pop 50Hz wheel entirely (shading + scatter)
+    flat_data_clean["wheel"]["means"].pop()
+    flat_data_clean["wheel"]["mean_freqs"].pop()
+    flat_data_clean["wheel"]["stds"].pop()
+    # Remove 50Hz wheel scatter points
+    wf = flat_data_clean["wheel"]
+    keep = [i for i, f in enumerate(wf["freqs"]) if f != 50]
+    wf["freqs"] = [wf["freqs"][i] for i in keep]
+    wf["trials"] = [wf["trials"][i] for i in keep]
+    # Re-add 50Hz as failure (shading tapers to 0, no scatter)
+    wf["mean_freqs"].append(50)
+    wf["means"].append(0.0)
+    wf["stds"].append(0.0)
 
-fig_clean, ax_clean = plt.subplots(figsize=(7, 5))
-plot_terrain(ax_clean, flat_data_clean, "Flat Terrain: Velocity vs Frequency")
-ax_clean.plot(50, 0, "x", color=COLORS["wheel"], markersize=10, markeredgewidth=2.5, zorder=5)
-ax_clean.set_xticks([10, 20, 30, 50])
-ax_clean.set_xlim(5, 55)
-fig_clean.tight_layout()
-fig_clean.savefig("experimental_data/plots/velocity_vs_freq_flat_clean.png", dpi=150)
+    fig_clean, ax_clean = plt.subplots(figsize=(7, 5))
+    plot_terrain(ax_clean, flat_data_clean, "Flat Terrain: Velocity vs Frequency")
+    ax_clean.plot(50, 0, "x", color=COLORS["wheel"], markersize=10, markeredgewidth=2.5, zorder=5)
+    ax_clean.set_xticks([10, 20, 30, 50])
+    ax_clean.set_xlim(5, 55)
+    fig_clean.tight_layout()
+    fig_clean.savefig("experimental_data/plots/velocity_vs_freq_flat_clean.png", dpi=150)
 
-# Inject wheel failure modes at 10/20 Hz into step data so shading covers 10→20→30
-step_data["wheel"]["mean_freqs"] = [10, 20] + step_data["wheel"]["mean_freqs"]
-step_data["wheel"]["means"] = [0.0, 0.0] + step_data["wheel"]["means"]
-step_data["wheel"]["stds"] = [0.0, 0.0] + step_data["wheel"]["stds"]
+    # Inject wheel failure modes at 10/20 Hz into step data so shading covers 10→20→30
+    step_data["wheel"]["mean_freqs"] = [10, 20] + step_data["wheel"]["mean_freqs"]
+    step_data["wheel"]["means"] = [0.0, 0.0] + step_data["wheel"]["means"]
+    step_data["wheel"]["stds"] = [0.0, 0.0] + step_data["wheel"]["stds"]
 
-# Step plot
-fig_step, ax_step = plt.subplots(figsize=(7, 5))
-plot_terrain(ax_step, step_data, "Step Terrain: Velocity vs Frequency")
-# X markers for wheel failure modes
-ax_step.plot(10, 0, "x", color=wc, markersize=10, markeredgewidth=2.5, zorder=5)
-ax_step.plot(20, 0, "x", color=wc, markersize=10, markeredgewidth=2.5, zorder=5)
-ax_step.set_xticks([10, 20, 30])
-ax_step.set_xlim(5, 35)
-fig_step.tight_layout()
-fig_step.savefig("experimental_data/plots/velocity_vs_freq_step.png", dpi=150)
+    # Step plot
+    fig_step, ax_step = plt.subplots(figsize=(7, 5))
+    plot_terrain(ax_step, step_data, "Step Terrain: Velocity vs Frequency")
+    # X markers for wheel failure modes
+    ax_step.plot(10, 0, "x", color=wc, markersize=10, markeredgewidth=2.5, zorder=5)
+    ax_step.plot(20, 0, "x", color=wc, markersize=10, markeredgewidth=2.5, zorder=5)
+    ax_step.set_xticks([10, 20, 30])
+    ax_step.set_xlim(5, 35)
+    fig_step.tight_layout()
+    fig_step.savefig("experimental_data/plots/velocity_vs_freq_step.png", dpi=150)
 
-# ── Combined side-by-side: flat (clean) + step ──
-flat_side = extract_flat()
-# Remove 50Hz wheel scatter, add failure mode
-wf2 = flat_side["wheel"]
-wf2["means"].pop(); wf2["mean_freqs"].pop(); wf2["stds"].pop()
-keep2 = [i for i, f in enumerate(wf2["freqs"]) if f != 50]
-wf2["freqs"] = [wf2["freqs"][i] for i in keep2]
-wf2["trials"] = [wf2["trials"][i] for i in keep2]
-wf2["mean_freqs"].append(50); wf2["means"].append(0.0); wf2["stds"].append(0.0)
+    # ── Combined side-by-side: flat (clean) + step ──
+    flat_side = extract_flat()
+    # Remove 50Hz wheel scatter, add failure mode
+    wf2 = flat_side["wheel"]
+    wf2["means"].pop(); wf2["mean_freqs"].pop(); wf2["stds"].pop()
+    keep2 = [i for i, f in enumerate(wf2["freqs"]) if f != 50]
+    wf2["freqs"] = [wf2["freqs"][i] for i in keep2]
+    wf2["trials"] = [wf2["trials"][i] for i in keep2]
+    wf2["mean_freqs"].append(50); wf2["means"].append(0.0); wf2["stds"].append(0.0)
 
-step_side = extract_step()
-step_side["wheel"]["mean_freqs"] = [10, 20] + step_side["wheel"]["mean_freqs"]
-step_side["wheel"]["means"] = [0.0, 0.0] + step_side["wheel"]["means"]
-step_side["wheel"]["stds"] = [0.0, 0.0] + step_side["wheel"]["stds"]
+    step_side = extract_step()
+    step_side["wheel"]["mean_freqs"] = [10, 20] + step_side["wheel"]["mean_freqs"]
+    step_side["wheel"]["means"] = [0.0, 0.0] + step_side["wheel"]["means"]
+    step_side["wheel"]["stds"] = [0.0, 0.0] + step_side["wheel"]["stds"]
 
-fig_both, (ax_top, ax_bot) = plt.subplots(2, 1, figsize=(7, 7.2))
+    fig_both, (ax_top, ax_bot) = plt.subplots(2, 1, figsize=(7, 7.2))
 
-plot_terrain(ax_top, flat_side, "Flat Terrain")
-ax_top.plot(50, 0, "x", color=COLORS["wheel"], markersize=10, markeredgewidth=2.5, zorder=5)
-ax_top.set_xticks([10, 20, 30, 50])
-ax_top.set_xlim(7, 53)
+    plot_terrain(ax_top, flat_side, "Flat Terrain")
+    ax_top.plot(50, 0, "x", color=COLORS["wheel"], markersize=10, markeredgewidth=2.5, zorder=5)
+    ax_top.set_xticks([10, 20, 30, 50])
+    ax_top.set_xlim(7, 53)
 
-plot_terrain(ax_bot, step_side, "Step Terrain")
-ax_bot.plot(10, 0, "x", color=COLORS["wheel"], markersize=10, markeredgewidth=2.5, zorder=5)
-ax_bot.plot(20, 0, "x", color=COLORS["wheel"], markersize=10, markeredgewidth=2.5, zorder=5)
-ax_bot.set_xticks([10, 20, 30])
-ax_bot.set_xlim(7, 33)
+    plot_terrain(ax_bot, step_side, "Step Terrain")
+    ax_bot.plot(10, 0, "x", color=COLORS["wheel"], markersize=10, markeredgewidth=2.5, zorder=5)
+    ax_bot.plot(20, 0, "x", color=COLORS["wheel"], markersize=10, markeredgewidth=2.5, zorder=5)
+    ax_bot.set_xticks([10, 20, 30])
+    ax_bot.set_xlim(7, 33)
 
-# Single legend on top panel
-handles, labels = ax_top.get_legend_handles_labels()
-ax_top.get_legend().remove()
-ax_bot.get_legend().remove()
-ax_top.legend(handles, labels, loc="upper left", fontsize=12, framealpha=0.9)
+    # Single legend on top panel
+    handles, labels = ax_top.get_legend_handles_labels()
+    ax_top.get_legend().remove()
+    ax_bot.get_legend().remove()
+    ax_top.legend(handles, labels, loc="upper left", fontsize=12, framealpha=0.9)
 
-fig_both.tight_layout()
-fig_both.savefig("experimental_data/plots/velocity_flat_vs_step.png", dpi=150, bbox_inches="tight")
+    fig_both.tight_layout()
+    fig_both.savefig("experimental_data/plots/velocity_flat_vs_step.png", dpi=150, bbox_inches="tight")
 
-print("Saved: experimental_data/plots/velocity_vs_freq_flat.png")
-print("Saved: experimental_data/plots/velocity_vs_freq_flat_clean.png")
-print("Saved: experimental_data/plots/velocity_vs_freq_step.png")
-print("Saved: experimental_data/plots/velocity_flat_vs_step.png")
-plt.show()
+    print("Saved: experimental_data/plots/velocity_vs_freq_flat.png")
+    print("Saved: experimental_data/plots/velocity_vs_freq_flat_clean.png")
+    print("Saved: experimental_data/plots/velocity_vs_freq_step.png")
+    print("Saved: experimental_data/plots/velocity_flat_vs_step.png")
+    plt.show()
+
+
+if __name__ == "__main__":
+    main()
