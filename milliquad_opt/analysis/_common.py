@@ -61,24 +61,43 @@ def detect_terrain(run_dir: pathlib.Path) -> str:
 # Pitch RMS
 # ---------------------------------------------------------------------------
 
-def compute_pitch_rms(traj: list[dict], settle_time: float = SETTLE_TIME) -> float:
+def compute_pitch_rms(
+    traj: list[dict],
+    settle_time: float = SETTLE_TIME,
+    step_start_x: float | None = None,
+    step_end_x: float | None = None,
+) -> float:
     """Pitch amplitude RMS (degrees) from FL/BL leg body positions.
 
     Uses geometric pitch: theta = arctan2(dz, dx) between front-left
     and back-left legs. Unwrapped and detrended.
+
+    For flat/rough: time-gated after settle_time.
+    For step: spatially-gated between step_start_x and 90% of step_end_x.
     """
     fl_pos = np.array([s["leg_xpos"][FL_IDX] for s in traj])
     bl_pos = np.array([s["leg_xpos"][BL_IDX] for s in traj])
-    t = np.array([s["time"] for s in traj])
 
     dx = fl_pos[:, 0] - bl_pos[:, 0]
     dz = fl_pos[:, 2] - bl_pos[:, 2]
     theta = np.degrees(np.unwrap(np.arctan2(dz, dx)))
 
-    mask = t >= settle_time
-    if mask.sum() < 10:
-        return 0.0
-    theta_active = theta[mask]
+    if step_start_x is not None and step_end_x is not None:
+        cutoff_x = step_start_x + 0.9 * (step_end_x - step_start_x)
+        pos_x = np.array([s["pos"][0] for s in traj])
+        enter_idx = np.searchsorted(pos_x, step_start_x)
+        exit_indices = np.where(pos_x >= cutoff_x)[0]
+        exit_idx = exit_indices[0] if len(exit_indices) else len(traj) - 1
+        if exit_idx <= enter_idx or (exit_idx - enter_idx) < 10:
+            return 0.0
+        theta_active = theta[enter_idx:exit_idx + 1]
+    else:
+        t = np.array([s["time"] for s in traj])
+        mask = t >= settle_time
+        if mask.sum() < 10:
+            return 0.0
+        theta_active = theta[mask]
+
     theta_active -= theta_active[0]  # detrend
     return float(np.std(theta_active))
 
@@ -155,6 +174,69 @@ def compute_cot(
 # ---------------------------------------------------------------------------
 # Velocity extraction
 # ---------------------------------------------------------------------------
+
+def min_window_velocity(
+    traj: list[dict],
+    ctrl_freq: float,
+    settle_time: float = SETTLE_TIME,
+    n_periods: int = 5,
+    step_start_x: float | None = None,
+    step_end_x: float | None = None,
+) -> float:
+    """Minimum mean |vx| over any sliding window of n_periods actuation cycles.
+
+    Returns the min window mean (m/s). Caller decides stall threshold.
+    Returns 0.0 for degenerate trajectories.
+    """
+    # Select measurement window (same gating as extract_velocity / compute_cot)
+    if step_start_x is not None and step_end_x is not None:
+        cutoff_x = step_start_x + 0.9 * (step_end_x - step_start_x)
+        enter_idx = None
+        exit_idx = None
+        for i, s in enumerate(traj):
+            if enter_idx is None and s["pos"][0] >= step_start_x:
+                enter_idx = i
+            if s["pos"][0] >= cutoff_x:
+                exit_idx = i
+                break
+        if enter_idx is None:
+            return 0.0
+        if exit_idx is None:
+            exit_idx = len(traj) - 1
+        active = traj[enter_idx:exit_idx + 1]
+    else:
+        start_idx = 0
+        for i, s in enumerate(traj):
+            if s["time"] >= settle_time:
+                start_idx = i
+                break
+        active = traj[start_idx:]
+
+    if len(active) < 2:
+        return 0.0
+
+    # Compute per-timestep forward velocity
+    pos_x = np.array([s["pos"][0] for s in active])
+    times = np.array([s["time"] for s in active])
+    dt = times[1] - times[0]
+    if dt < 1e-10:
+        return 0.0
+    vx = np.diff(pos_x) / np.diff(times)
+
+    # Sliding window size
+    period = 1.0 / ctrl_freq
+    window_sec = n_periods * period
+    window_steps = max(1, int(window_sec / dt))
+
+    if len(vx) < window_steps:
+        return float(np.mean(np.abs(vx)))
+
+    # Sliding window mean of |vx|
+    cumsum = np.cumsum(np.abs(vx))
+    cumsum = np.insert(cumsum, 0, 0.0)
+    window_means = (cumsum[window_steps:] - cumsum[:-window_steps]) / window_steps
+    return float(np.min(window_means))
+
 
 def extract_velocity(
     traj: list[dict],

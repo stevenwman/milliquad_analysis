@@ -54,25 +54,31 @@ def load_validation_csv(csv_path: pathlib.Path) -> list[dict]:
                 "cot": float(row["cot"]) if row["cot"] else None,
                 "crash": row["crash"] == "True",
                 "selected": row["selected"] == "True",
+                "min_window_vx": float(row["min_window_vx"]) if row.get("min_window_vx") else 0.0,
+                "pitch_rms": float(row["pitch_rms"]) if row.get("pitch_rms") else None,
+                "stalled": row.get("stalled", "False") == "True",
             })
     return rows
 
 
 def build_plot_data(rows: list[dict], metric: str,
                     min_vx: float | None = None,
-                    selected_only: bool = False) -> dict:
+                    selected_only: bool = False,
+                    exclude_stalled: bool = False) -> dict:
     """Group trials by scene.
 
     Returns {scene: {freqs, trials, mean_freqs, means, stds}}.
     All trials shown as scatter; shading = std (matching experimental plots).
-    metric: "vx" (converted to mm/s) or "cot".
-    min_vx: if set, exclude trials with vx below this (m/s). Useful for
-            COT on step terrain where stuck trials produce infinite COT.
+    metric: "vx" (converted to mm/s), "cot", or "pitch_rms" (degrees).
+    min_vx: if set, exclude trials with vx below this (m/s).
     selected_only: if True, use only selected=True trials (top 3 by vel error).
+    exclude_stalled: if True, exclude trials flagged as stalled (5-period window).
     """
     valid = [r for r in rows if not r["crash"]]
     if selected_only:
         valid = [r for r in valid if r.get("selected", False)]
+    if exclude_stalled:
+        valid = [r for r in valid if not r.get("stalled", False)]
     if min_vx is not None:
         valid = [r for r in valid if r["vx"] is not None and abs(r["vx"]) >= min_vx]
 
@@ -91,6 +97,8 @@ def build_plot_data(rows: list[dict], metric: str,
             freq_rows = [r for r in scene_rows if r["freq"] == freq]
             if metric == "vx":
                 vals = [r["vx"] * 1000 for r in freq_rows if r["vx"] is not None]
+            elif metric == "pitch_rms":
+                vals = [r["pitch_rms"] for r in freq_rows if r["pitch_rms"] is not None]
             else:
                 vals = [r["cot"] for r in freq_rows if r["cot"] is not None]
 
@@ -219,9 +227,9 @@ def main():
         print(f"Saved: {vel_path}")
         plt.close(fig_v)
 
-        # COT — filter out stuck trials (near-zero vx → infinite COT)
+        # COT — filter out stalled trials (5-period sustained velocity check)
         fig_c, ax_c = plt.subplots(figsize=(7, 5))
-        cot_data = build_plot_data(rows, "cot", min_vx=0.005, selected_only=True)
+        cot_data = build_plot_data(rows, "cot", selected_only=True, exclude_stalled=True)
         plot_panel(ax_c, cot_data, title, "Cost of Transport")
         ax_c.legend(loc="upper left", fontsize=12, framealpha=0.9)
         fig_c.tight_layout()

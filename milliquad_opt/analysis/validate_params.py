@@ -35,6 +35,8 @@ from analysis._common import (
     detect_terrain,
     extract_velocity,
     compute_cot,
+    compute_pitch_rms,
+    min_window_velocity,
     SETTLE_TIME,
 )
 from config import sim_params_from_point, reference_rows
@@ -171,6 +173,7 @@ def main():
     ref_summaries: list[dict] = []
     failure_mode_results: list[dict] = []
     replay_specs: list[dict] = []  # for --record: re-run selected trials with video
+    traj_arrays: dict[str, np.ndarray] = {}  # {rid}_t{trial}_{time,pos_x} → 1D array
 
     for ref_idx, ref_row in enumerate(ref_rows):
         scene = ref_row["scene"]
@@ -251,27 +254,37 @@ def main():
                 print(f" CRASH ({e.__class__.__name__})")
                 trials.append({"trial": t, "seed": seed, "jitter_type": jitter_type,
                                "jitter_value": jitter_value, "vx": None,
-                               "err": float("inf"), "cot": None, "crash": True})
+                               "err": float("inf"), "cot": None, "crash": True,
+                               "min_window_vx": 0.0, "pitch_rms": None})
                 continue
 
             if traj is None:
                 print(" CRASH (None)")
                 trials.append({"trial": t, "seed": seed, "jitter_type": jitter_type,
                                "jitter_value": jitter_value, "vx": None,
-                               "err": float("inf"), "cot": None, "crash": True})
+                               "err": float("inf"), "cot": None, "crash": True,
+                               "min_window_vx": 0.0, "pitch_rms": None})
                 continue
 
             vx = extract_velocity(traj, SETTLE_TIME, step_start_x, step_end_x)
+            traj_key = f"{rid}_t{t}"
+            traj_arrays[f"{traj_key}_time"] = np.array([s["time"] for s in traj])
+            traj_arrays[f"{traj_key}_pos_x"] = np.array([s["pos"][0] for s in traj])
             err = abs(vx - target) / target * 100
             cot = compute_cot(traj, mass, SETTLE_TIME,
                               step_start_x=step_start_x, step_end_x=step_end_x)
+            mwv = min_window_velocity(traj, freq, SETTLE_TIME,
+                                      step_start_x=step_start_x, step_end_x=step_end_x)
+            pitch_rms = compute_pitch_rms(traj, SETTLE_TIME,
+                                         step_start_x=step_start_x, step_end_x=step_end_x)
 
             cot_str = f"  COT={cot:.2f}" if cot is not None else ""
-            print(f" vx={vx*100:.1f}cm/s  err={err:.1f}%{cot_str}")
+            print(f" vx={vx*100:.1f}cm/s  err={err:.1f}%{cot_str}  mwv={mwv*100:.1f}mm/s  pitch={pitch_rms:.1f}°")
 
             trials.append({"trial": t, "seed": seed, "jitter_type": jitter_type,
                            "jitter_value": jitter_value, "vx": vx,
-                           "err": err, "cot": cot, "crash": False})
+                           "err": err, "cot": cot, "crash": False,
+                           "min_window_vx": mwv, "pitch_rms": pitch_rms})
 
         # Select top N_SELECT by velocity error
         valid = [tr for tr in trials if not tr["crash"]]
@@ -327,6 +340,8 @@ def main():
                 "velocity_error_pct": tr["err"] if not tr["crash"] else "",
                 "cot": tr["cot"] if tr["cot"] is not None else "",
                 "crash": tr["crash"], "selected": tr["selected"],
+                "min_window_vx": tr.get("min_window_vx", ""),
+                "pitch_rms": tr["pitch_rms"] if tr["pitch_rms"] is not None else "",
             })
 
     # --- Exploratory conditions (rough only, no optimization target) ---
@@ -375,25 +390,33 @@ def main():
                     print(f" CRASH ({e.__class__.__name__})")
                     trials.append({"trial": t, "seed": seed, "jitter_type": jitter_type,
                                    "jitter_value": jitter_value, "vx": None,
-                                   "cot": None, "crash": True})
+                                   "cot": None, "crash": True, "min_window_vx": 0.0,
+                                   "pitch_rms": None})
                     continue
 
                 if traj is None:
                     print(" CRASH (None)")
                     trials.append({"trial": t, "seed": seed, "jitter_type": jitter_type,
                                    "jitter_value": jitter_value, "vx": None,
-                                   "cot": None, "crash": True})
+                                   "cot": None, "crash": True, "min_window_vx": 0.0,
+                                   "pitch_rms": None})
                     continue
 
                 vx = extract_velocity(traj, SETTLE_TIME)
+                traj_key = f"{rid}_t{t}"
+                traj_arrays[f"{traj_key}_time"] = np.array([s["time"] for s in traj])
+                traj_arrays[f"{traj_key}_pos_x"] = np.array([s["pos"][0] for s in traj])
                 cot = compute_cot(traj, mass, SETTLE_TIME)
+                mwv = min_window_velocity(traj, freq, SETTLE_TIME)
+                pitch_rms = compute_pitch_rms(traj, SETTLE_TIME)
 
                 cot_str = f"  COT={cot:.2f}" if cot is not None else ""
-                print(f" vx={vx*100:.1f}cm/s{cot_str}")
+                print(f" vx={vx*100:.1f}cm/s{cot_str}  mwv={mwv*100:.1f}mm/s  pitch={pitch_rms:.1f}°")
 
                 trials.append({"trial": t, "seed": seed, "jitter_type": jitter_type,
                                "jitter_value": jitter_value, "vx": vx,
-                               "cot": cot, "crash": False})
+                               "cot": cot, "crash": False, "min_window_vx": mwv,
+                               "pitch_rms": pitch_rms})
 
             # Random selection (no sorting by error)
             valid = [tr for tr in trials if not tr["crash"]]
@@ -447,6 +470,8 @@ def main():
                     "velocity_error_pct": "",
                     "cot": tr["cot"] if tr["cot"] is not None else "",
                     "crash": tr["crash"], "selected": tr["selected"],
+                    "min_window_vx": tr.get("min_window_vx", ""),
+                    "pitch_rms": tr["pitch_rms"] if tr["pitch_rms"] is not None else "",
                 })
 
     # --- Summary ---
@@ -504,13 +529,20 @@ def main():
                 print(f" FAILED ({e.__class__.__name__})")
         print(f"  Videos: {video_dir}/")
 
+    # --- Trajectory data ---
+    if args.csv and traj_arrays:
+        npz_path = args.run_dir / "validation_trajectories.npz"
+        np.savez_compressed(npz_path, **traj_arrays)
+        print(f"\n  Trajectories: {npz_path} ({len(traj_arrays)//2} trials)")
+
     # --- CSV output ---
     if args.csv and all_trial_rows:
         csv_path = args.run_dir / "validation_trials.csv"
         fieldnames = [
             "ref_id", "scene", "ctrl_freq", "target_speed", "trial",
             "rng_seed", "jitter_type", "jitter_value", "vx",
-            "velocity_error_pct", "cot", "crash", "selected",
+            "velocity_error_pct", "cot", "crash", "selected", "min_window_vx",
+            "pitch_rms",
         ]
         with open(csv_path, "w", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
