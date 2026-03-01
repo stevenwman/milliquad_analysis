@@ -9,6 +9,26 @@ from config_step import *  # noqa: F401,F403
 
 from typing import Any
 
+# Override warm-start: best from 20260228T093833_rk4_step_cold (RK4, cost=0.243)
+CMAES_X0: dict[str, float] | None = {
+    "sliding_friction": 0.3582123326297241,
+    "torsional_friction": 0.001674384710738038,
+    "rolling_friction": 2.7110096240265e-05,
+    "solref_timeconst": 0.007283996600844991,
+    "solref_dampratio": 2.375679878551411,
+    "solimp_dmin": 0.4316522429191366,
+    "solimp_delta_d": 0.7124418633514087,
+    "solimp_width": 0.0001989986853690175,
+    "solimp_midpoint": 0.366133159648605,
+    "solimp_power": 4.144976375670096,
+    "magnetic_moment_fudge": 0.7969032467888846,
+    "magnetic_field_fudge": 0.8021632746852211,
+    "dof_damping": 9.250998520843749e-10,
+    "noslip_iterations": 30.35741633589493,
+    "noslip_tolerance": 1.5061233543640077e-05,
+    "margin": 0.0002708738792761414,
+}
+
 # Override REFERENCE_DATA with q60-derived targets
 REFERENCE_DATA: list[dict[str, Any]] = [
     # Single leg (scene1)
