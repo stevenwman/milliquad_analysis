@@ -170,7 +170,7 @@ def main():
             leg.remove()
 
     fig.tight_layout()
-    out = args.output or "exp_vs_sim_velocity.png"
+    out = args.output or "plots/exp_vs_sim_velocity.png"
     fig.savefig(out, dpi=150, bbox_inches="tight")
     print(f"Saved: {out}")
 

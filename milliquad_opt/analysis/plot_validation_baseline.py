@@ -293,7 +293,7 @@ def plot_panel(
     ax.set_xlabel("Frequency (Hz)")
     ax.set_ylabel(ylabel)
     ax.set_title(title)
-    ax.grid(axis="y", alpha=0.3)
+    ax.grid(True, alpha=0.3)
 
     all_freqs = set(f for d in data.values() for f in d["mean_freqs"])
     if failures:
@@ -304,45 +304,9 @@ def plot_panel(
             all_freqs.update(freqs)
     all_freqs_sorted = sorted(all_freqs)
     if all_freqs_sorted:
+        ax.set_xticks([int(f) for f in all_freqs_sorted])
         pad = (scatter_dodge_width / 2 + intra_spread / 2 + 1) if scatter_only else 3
         ax.set_xlim(all_freqs_sorted[0] - pad, all_freqs_sorted[-1] + pad)
-        if scatter_only:
-            # No tick marks — bands provide structure
-            ax.set_xticks([])
-            ax.set_xticks(all_freqs_sorted, minor=True)
-            ax.set_xticklabels([str(int(f)) for f in all_freqs_sorted], minor=True)
-            ax.tick_params(which="minor", length=0)
-        else:
-            # Bracket ticks: 2 marks per frequency bounding the dodge spread
-            half_spread = dodge_width * 2.25
-            edge_ticks = []
-            for f in all_freqs_sorted:
-                edge_ticks.extend([f - half_spread, f + half_spread])
-            ax.set_xticks(edge_ticks)
-            ax.set_xticklabels([""] * len(edge_ticks))
-            ax.set_xticks(all_freqs_sorted, minor=True)
-            ax.set_xticklabels([str(int(f)) for f in all_freqs_sorted], minor=True)
-            ax.tick_params(which="minor", length=0)
-            # Grey bands in gaps between bracket zones (white inside brackets)
-            x_lo = all_freqs_sorted[0] - pad
-            x_hi = all_freqs_sorted[-1] + pad
-            ax.axvspan(x_lo, all_freqs_sorted[0] - half_spread, color="#f0f0f0", zorder=0)
-            for j in range(len(all_freqs_sorted) - 1):
-                ax.axvspan(all_freqs_sorted[j] + half_spread,
-                           all_freqs_sorted[j + 1] - half_spread,
-                           color="#f0f0f0", zorder=0)
-            ax.axvspan(all_freqs_sorted[-1] + half_spread, x_hi, color="#f0f0f0", zorder=0)
-        if scatter_only:
-            # Alternating bands
-            x_lo = all_freqs_sorted[0] - pad
-            x_hi = all_freqs_sorted[-1] + pad
-            edges = [x_lo]
-            for j in range(len(all_freqs_sorted) - 1):
-                edges.append((all_freqs_sorted[j] + all_freqs_sorted[j + 1]) / 2)
-            edges.append(x_hi)
-            for j in range(len(edges) - 1):
-                if j % 2 == 0:
-                    ax.axvspan(edges[j], edges[j + 1], color="#f0f0f0", zorder=0)
 
 
 def main():

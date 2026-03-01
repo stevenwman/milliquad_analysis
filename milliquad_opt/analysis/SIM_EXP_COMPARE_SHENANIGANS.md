@@ -18,15 +18,15 @@ Wheel robot has failure modes that need different treatment on exp vs sim sides:
 - **Step WR f10, f20**: Wheel can't move on steps at low frequency. This is a physical limitation the sim reproduces (near-zero velocity).
 - Treatment: both panels get shading tapered to 0 + X markers.
 
-## Shading Taper Convention
+## Failure Frequency Handling
 
-When a morphology fails at a frequency, we don't just drop the data point — we inject `mean=0, std=0` at that frequency so the `fill_between` shading smoothly tapers from the nearest real data point down to zero. This matches the style in `experimental_data/plots/velocity_vs_freq_flat_clean.png`.
+When a morphology fails at a frequency, `_strip_failure_freqs()` removes the frequency entirely from the data (trials, mean, std). No shading connects to or from the failure point. An X marker at y=0 indicates the failure independently.
 
-Key detail: injected zeros must be **sorted by frequency** with the real data, otherwise `fill_between` draws crossed/garbled bands. The reference `plot_velocity_vs_freq.py` prepends zeros (which works because failures are always at freq extremes), but `plot_exp_vs_sim.py` appends then sorts.
+Previously, `_inject_failure_zeros()` inserted `mean=0, std=0` to taper the shading band to zero. This was misleading — it implied a gradual decline when the reality is binary (works or doesn't). Replaced with clean stripping.
 
-## Scatter Points at Failures
+Scatter dots at failure frequencies are also stripped. Only the X marker at y=0 remains. This prevents misleading non-zero dots from experimental noise.
 
-Scatter dots at failure frequencies are **stripped** (not shown). Only the X marker at y=0 remains. This prevents misleading non-zero dots from experimental noise (e.g., wheel f50 flat had some gentle-actuation trials with nonzero velocity that aren't representative).
+Failure X markers appear on **all panel types** (velocity, pitch, COT) — not just velocity. Both exp and sim panels get their respective failure dicts.
 
 ## Wheel f50 Flat Sim Data
 
@@ -121,11 +121,41 @@ Flat trials all pass both checks (no gate, no inversions). WR f50 pitch_rms is ~
 
 ---
 
+## Scatter-Only Mode (Rough Terrain)
+
+Rough terrain has high trial-to-trial variance and low sample counts (some conditions only 1-2 successful trials out of 5). Standard `fill_between` shading is misleading with <3 data points — a band implies a distribution where there's barely a sample. Instead, rough panels use `scatter_only=True`:
+
+- **No shading** (`fill_between` suppressed)
+- **Individual trial dots** spread horizontally within each morphology's dodge slot
+- **Sorted left-to-right** by value (lowest on left, highest on right) so visual spread indicates variance
+- **Wider dodge**: `scatter_dodge_width = 15.0` Hz between morphologies (vs `dodge_width = 1.2` Hz for flat/step). Frequency ticks are 20 Hz apart.
+- **Intra-morphology spread**: `intra_spread = 3.0` Hz — 5 trials span ±1.5 Hz within each morphology slot
+- **Clearance constraint**: morphology gap = `sdw / (n-1)` must be > `intra_spread`, otherwise adjacent morphology groups bleed into each other. Current: gap = 15/3 = 5.0 Hz, clearance = 5.0 - 3.0 = 2.0 Hz.
+- **Xlim padding**: auto-computed as `sdw/2 + intra_spread/2 + 1` for scatter_only (vs fixed ±3 Hz for flat/step)
+- **Figure width**: megacomposite uses 8 inches/column (vs default 6) to give scatter dots more physical space
+
+Activated by `terrain.startswith("rough")` in both `plot_validation.py` (standalone + 3×3 composite) and `plot_megacomposite.py` (rough row, all 5 columns).
+
+## Experimental Rough n/a Trials
+
+`extract_rough()` from `experimental_data/plot_velocity_vs_freq.py` silently drops `n/a` trials from the CSV. This hides failure information — e.g., wheel f10 has 4/5 n/a (20% success rate) but the plot only shows 1 dot.
+
+Fix: `_inject_na_zeros()` in `plot_megacomposite.py` adds zeros for each missing trial (`5 - n_success` per condition). In scatter_only mode, `plot_panel` separates `val > 0` (success dots) from `val <= 0` (X markers at y=0). All trials (successes + failures) share the same intra_spread spacing so they don't overlap.
+
+This is velocity-only — rough experimental pitch data doesn't exist yet.
+
+## Dodge on X Markers
+
+All X markers (failure modes, all-invalid combos) now receive morphology-based horizontal offset (`dx`), matching the scatter dot positions. Previously X markers sat at the exact frequency tick, misaligned from their morphology's dots. Uses the same `dodge_width` or `scatter_dodge_width` depending on mode.
+
+---
+
 ## Script Inventory
 
 | Script | Purpose | Status |
 |--------|---------|--------|
 | `plot_validation.py` | Sim-only: velocity/COT/pitch per terrain + 3×3 composite | **Primary** |
+| `plot_megacomposite.py` | 3×5 megacomposite: 3 terrains × (vel exp\|sim, pitch exp\|sim, COT) | **Primary** |
 | `plot_exp_vs_sim_composite.py` | Exp vs sim: 2×4 (flat+step × vel+pitch × exp+sim) | **Primary** |
 | `plot_exp_vs_sim.py` | Exp vs sim velocity only (old 2×2) | Legacy |
 | `plot_exp_vs_sim_pitch.py` | Exp vs sim pitch only (old 2×2) | Legacy |

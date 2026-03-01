@@ -13,7 +13,7 @@
 <table>
 <tr><th>Old (rk4_step_cold, q75)</th><th>New (step_q60_rk-warm)</th></tr>
 <tr>
-<td><img src="velocity_vs_freq_step_old.png" width="450"/></td>
+<td><img src="plot_archive/velocity_vs_freq_step_old.png" width="450"/></td>
 <td><img src="velocity_vs_freq_step.png" width="450"/></td>
 </tr>
 </table>
@@ -23,7 +23,7 @@
 <table>
 <tr><th>Old (rk4_rough, time-gated)</th><th>New (rough_spatial_rk4)</th></tr>
 <tr>
-<td><img src="velocity_vs_freq_rough_old.png" width="450"/></td>
+<td><img src="plot_archive/velocity_vs_freq_rough_old.png" width="450"/></td>
 <td><img src="velocity_vs_freq_rough.png" width="450"/></td>
 </tr>
 </table>
@@ -41,7 +41,7 @@
 <table>
 <tr><th>Old (rk4_step_cold, q75)</th><th>New (step_q60_rk-warm)</th></tr>
 <tr>
-<td><img src="cot_vs_freq_step_old.png" width="450"/></td>
+<td><img src="plot_archive/cot_vs_freq_step_old.png" width="450"/></td>
 <td><img src="cot_vs_freq_step.png" width="450"/></td>
 </tr>
 </table>
@@ -51,7 +51,7 @@
 <table>
 <tr><th>Old (rk4_rough, time-gated)</th><th>New (rough_spatial_rk4)</th></tr>
 <tr>
-<td><img src="cot_vs_freq_rough_old.png" width="450"/></td>
+<td><img src="plot_archive/cot_vs_freq_rough_old.png" width="450"/></td>
 <td><img src="cot_vs_freq_rough.png" width="450"/></td>
 </tr>
 </table>
@@ -67,7 +67,7 @@
 <table>
 <tr><th>Old (rk4_step_cold)</th><th>New (step_q60_rk-warm)</th></tr>
 <tr>
-<td><img src="exp_vs_sim_velocity_old2.png" width="450"/></td>
+<td><img src="plot_archive/exp_vs_sim_velocity_old2.png" width="450"/></td>
 <td><img src="exp_vs_sim_velocity.png" width="450"/></td>
 </tr>
 </table>
@@ -77,7 +77,7 @@
 <table>
 <tr><th>Old (rk4_step_cold)</th><th>New (step_q60_rk-warm)</th></tr>
 <tr>
-<td><img src="exp_vs_sim_pitch_old2.png" width="450"/></td>
+<td><img src="plot_archive/exp_vs_sim_pitch_old2.png" width="450"/></td>
 <td><img src="exp_vs_sim_pitch.png" width="450"/></td>
 </tr>
 </table>

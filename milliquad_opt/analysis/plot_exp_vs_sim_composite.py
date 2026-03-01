@@ -73,7 +73,8 @@ def _get_sim_failures(terrain: str) -> dict[str, list[float]]:
     return _SHARED_FAILURES.get(terrain, {})
 
 
-def _inject_failure_zeros(data: dict, failures: dict[str, list[float]]):
+def _strip_failure_freqs(data: dict, failures: dict[str, list[float]]):
+    """Remove failure frequencies from data entirely (no shading taper to 0)."""
     for scene, fail_freqs in failures.items():
         if scene not in data:
             continue
@@ -84,16 +85,9 @@ def _inject_failure_zeros(data: dict, failures: dict[str, list[float]]):
             d["trials"] = [d["trials"][j] for j in keep]
             if ff in d["mean_freqs"]:
                 idx = d["mean_freqs"].index(ff)
-                d["means"][idx] = 0.0
-                d["stds"][idx] = 0.0
-            else:
-                d["mean_freqs"].append(ff)
-                d["means"].append(0.0)
-                d["stds"].append(0.0)
-        order = sorted(range(len(d["mean_freqs"])), key=lambda k: d["mean_freqs"][k])
-        d["mean_freqs"] = [d["mean_freqs"][k] for k in order]
-        d["means"] = [d["means"][k] for k in order]
-        d["stds"] = [d["stds"][k] for k in order]
+                d["mean_freqs"].pop(idx)
+                d["means"].pop(idx)
+                d["stds"].pop(idx)
 
 
 
@@ -144,12 +138,12 @@ def main():
         # --- Velocity columns (0, 1) ---
         # Experimental velocity
         exp_vel = _remap_exp_data(vel_extractors[terrain]())
-        _inject_failure_zeros(exp_vel, exp_failures)
+        _strip_failure_freqs(exp_vel, exp_failures)
         plot_panel(axes[i, 0], exp_vel, f"{title}: Exp Velocity", "Forward Velocity (mm/s)", exp_failures)
 
         # Simulation velocity
         sim_vel = build_plot_data(rows, "vx", selected_only=True, exclude_invalid=True, gate_end=ge)
-        _inject_failure_zeros(sim_vel, sim_failures)
+        _strip_failure_freqs(sim_vel, sim_failures)
         plot_panel(axes[i, 1], sim_vel, f"{title}: Sim Velocity", "Forward Velocity (mm/s)", sim_failures, all_failed)
 
         # Share y-axis for velocity pair
@@ -161,15 +155,17 @@ def main():
         # --- Pitch columns (2, 3) ---
         # Experimental pitch
         exp_pitch = _remap_exp_data(pitch_extractors[terrain]())
+        _strip_failure_freqs(exp_pitch, exp_failures)
         if pitch_exclude:
             strip_freqs(exp_pitch, pitch_exclude)
-        plot_panel(axes[i, 2], exp_pitch, f"{title}: Exp Pitch", "Pitch Amplitude RMS (\u00b0)")
+        plot_panel(axes[i, 2], exp_pitch, f"{title}: Exp Pitch", "Pitch Amplitude RMS (\u00b0)", exp_failures)
 
         # Simulation pitch
         sim_pitch = build_plot_data(rows, "pitch_rms", selected_only=True, exclude_invalid=True, gate_end=ge)
+        _strip_failure_freqs(sim_pitch, sim_failures)
         if pitch_exclude:
             strip_freqs(sim_pitch, pitch_exclude)
-        plot_panel(axes[i, 3], sim_pitch, f"{title}: Sim Pitch", "Pitch Amplitude RMS (\u00b0)", all_failed=all_failed)
+        plot_panel(axes[i, 3], sim_pitch, f"{title}: Sim Pitch", "Pitch Amplitude RMS (\u00b0)", sim_failures, all_failed=all_failed)
 
         # Share y-axis for pitch pair
         y_lo = min(axes[i, 2].get_ylim()[0], axes[i, 3].get_ylim()[0])
@@ -186,7 +182,7 @@ def main():
             leg.remove()
 
     fig.tight_layout()
-    out = args.output or "exp_vs_sim_composite.png"
+    out = args.output or "plots/exp_vs_sim_composite.png"
     fig.savefig(out, dpi=150, bbox_inches="tight")
     print(f"Saved: {out}")
 

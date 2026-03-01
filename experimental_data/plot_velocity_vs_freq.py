@@ -173,6 +173,42 @@ def extract_step_q60():
     return data
 
 
+def extract_rough():
+    """Rough (random) terrain velocity from random_terrain_raw.csv.
+
+    Returns same format as extract_flat: {morph: {freqs, trials, mean_freqs, means, stds}}.
+    Only successful trials (non-'n/a') are included.
+    """
+    import csv
+
+    csv_path = Path(__file__).resolve().parent / "csv" / "random_terrain_raw.csv"
+    _CSV_MORPH = {"leg": "leg", "2-leg": "2leg", "4-leg": "4leg", "wheel": "wheel"}
+    data = {m: {"freqs": [], "trials": [], "mean_freqs": [], "means": [], "stds": []} for m in COLORS}
+
+    for row in csv.DictReader(open(csv_path)):
+        freq = float(row["freq_hz"])
+        morph = _CSV_MORPH[row["morphology"]]
+        trials = []
+        for k in ("trial_1", "trial_2", "trial_3", "trial_4", "trial_5"):
+            v = row[k].strip()
+            if v and v != "n/a":
+                trials.append(float(v))
+        if not trials:
+            continue
+        data[morph]["freqs"].extend([freq] * len(trials))
+        data[morph]["trials"].extend(trials)
+        data[morph]["mean_freqs"].append(freq)
+        data[morph]["means"].append(np.mean(trials))
+        data[morph]["stds"].append(np.std(trials, ddof=1) if len(trials) > 1 else 0.0)
+
+    for morph in data:
+        order = np.argsort(data[morph]["mean_freqs"])
+        data[morph]["mean_freqs"] = [data[morph]["mean_freqs"][i] for i in order]
+        data[morph]["means"] = [data[morph]["means"][i] for i in order]
+        data[morph]["stds"] = [data[morph]["stds"][i] for i in order]
+    return data
+
+
 # ── Plotting ──
 
 def plot_terrain(ax, data, title):
