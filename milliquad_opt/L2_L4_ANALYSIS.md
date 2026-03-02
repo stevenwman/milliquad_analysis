@@ -323,14 +323,14 @@ No velocity, no drive_angle, no contact data. **Only H3 (velocity ripple via dif
 - Added datetime prefix to output filenames (prevents overwriting old data)
 - Float32 casting: 2× size reduction vs float64, max relative error ~6e-8 (f32 machine epsilon)
 
-### Step 4: Run validation — NEEDS RE-RUN (body contact fields added)
+### Step 4: Run validation — DONE (2026-03-02, re-run with body contact)
 
-Previous run produced 16 fields/trial. New run will produce 19 fields/trial (added `body_in_contact`, `body_normal_force`, `body_tangent_force`). Datetime prefix preserves old files.
+19 fields/trial (16 original + 3 body contact). Previous 16-field NPZ files were verified identical on shared arrays, then deleted.
 
-**Previous NPZ files** (16 fields, still valid for leg-only analysis):
-- Flat: `20260302T123027_validation_trajectories.npz` (50 MB, 80 trials × 16 fields)
-- Step: `20260302T123511_validation_trajectories.npz` (69 MB, 60 trials × 16 fields)
-- Rough: `20260302T123742_validation_trajectories.npz` (47 MB, 120 trials × 16 fields)
+**Current NPZ files** (19 fields):
+- Flat: `20260302T141425_validation_trajectories.npz` (53 MB, 80 trials × 19 fields)
+- Step: `20260302T141529_validation_trajectories.npz` (72 MB, 60 trials × 19 fields)
+- Rough: `20260302T141807_validation_trajectories.npz` (49 MB, 120 trials × 19 fields)
 
 **Re-run commands** (from `milliquad_opt/`):
 ```bash
@@ -385,7 +385,9 @@ uv run python -m analysis.l2_l4.contact_duty_factor results/20260228T013353_rk4_
 
 8. **Keep analysis scripts self-contained from existing pipelines.** `_common.py` controls plotting infrastructure — modifying it for prototype analysis risks breaking production plots. Created `analysis/l2_l4/_trial_filter.py` as a local shared module instead.
 
-9. **Wheel model shares leg topology with spoke robots.** The wheel MJCF (`robot_wheel.xml`) has 4 hinge joints (FR/FL/BR/BL) and 4 bodies at IDs 2-5, same as spoke models. `_extract_contact_data` maps these as "legs" — so wheel's per-leg arrays represent per-wheel-segment data. No code changes needed, but interpret wheel's `leg_in_contact`, force, and position arrays as segment-level, not limb-level. H3 and H4 (velocity ripple, phase-propulsion) don't use contact arrays and are unaffected.
+9. **Body contact (belly-drag) is a dominant failure mode for L1.** L1 spends 20–60% of active time with chassis on the ground on step/rough terrain. Adding `body_in_contact` to the recording was essential — without it, L1's high zero-leg-contact fraction looks like "legs in the air" when it's actually "belly on the ground." Different morphologies fail differently: L1 belly-drags, WR gets stuck with legs gripping but no forward progress.
+
+10. **Wheel model shares leg topology with spoke robots.** The wheel MJCF (`robot_wheel.xml`) has 4 hinge joints (FR/FL/BR/BL) and 4 bodies at IDs 2-5, same as spoke models. `_extract_contact_data` maps these as "legs" — so wheel's per-leg arrays represent per-wheel-segment data. No code changes needed, but interpret wheel's `leg_in_contact`, force, and position arrays as segment-level, not limb-level. H3 and H4 (velocity ripple, phase-propulsion) don't use contact arrays and are unaffected.
 
 ---
 
@@ -487,22 +489,40 @@ analysis/l2_l4/
 ### H1 plots — DONE (2026-03-02)
 
 **1b: Simultaneous contact histogram** (`plot_contact_histogram.py`)
-- Grouped bars: x = 0–4 simultaneous contacts, y = fraction of timesteps, grouped by morphology
-- One panel per terrain (flat | step | rough), all freqs pooled
-- Key observation: all morphologies peak at 0 contacts. L1 has highest zero-contact fraction (~65% flat, ~62% rough). WR distributes more evenly across 1–4. L4 and WR show notably more 2–3 simultaneous contacts than L1.
+- Grouped bars: x = 0–4 simultaneous leg contacts + "Body" bin (chassis-terrain contact fraction), y = fraction of timesteps, grouped by morphology
+- Grid: rows = terrain, columns = drive frequency. Unified freq grid across terrains (blank cells where freq not tested).
+- Per-trial mean ± std error bars. Annotated with N=valid/total per morphology.
+- `--failed` flag inverts trial selection (shows failing trials instead of passing). Uses time-only mask since failed robots may not reach terrain region. Terrains with zero failures (e.g. flat) are omitted automatically.
+- Body bin is hatched, separated by dashed line from leg bins.
+- Old iterations archived in `figures/archive/`.
+
+**Key findings from H1**:
+- All morphologies peak at 0 leg contacts across all terrains — legs are airborne most of the time.
+- L1 has ~60–70% zero-contact fraction. L4 and WR distribute more evenly across 1–3 contacts.
+- **Body contact is the big reveal**: L1 shows ~20–60% body contact on step/rough terrain — the robot is belly-dragging. L4 and WR keep the body elevated.
+- Contact redundancy isn't just "more legs touch ground" — it's "more legs keep the body OFF the ground."
+- **Failure mode divergence**: L1 fails by belly-sliding with no leg contact. WR fails by having leg contact but no forward progress (stuck on terrain features). L2/L4 rarely fail.
+- **WR pass rates are very low**: step 3–5/15, rough 7/30. WR's theoretical continuous-contact advantage doesn't translate to traversal success.
+- Frequency matters: at 50 Hz, L4 zero-contact fraction approaches L1 levels on flat terrain. On rough, high frequency helps WR pass rate (4/10 at 50 Hz vs 0/10 at 10 Hz).
 
 **1a: Contact raster** (`plot_contact_raster.py`)
-- Per-leg on/off heatmap for one representative trial (median duty factor) per morphology
-- Picks highest available frequency by default, configurable with `--freq`
-- Key observation: L1 contacts are "lumpy" — sustained blocks on 1–2 legs with long dead zones. WR has dense rapid-fire contacts. L4 is intermediate — sparser per leg but more temporal overlap.
+- Per-leg on/off heatmap for one representative trial (median duty factor) per morphology.
+- Picks highest available frequency by default, configurable with `--freq`.
+- Sanity check — confirms histogram patterns visually.
 
 **Usage** (from `milliquad_opt/`):
 ```bash
-# 1b — all three terrains
+# 1b — passing trials, all terrains
 uv run python -m analysis.l2_l4.H1.plot_contact_histogram \
     results/20260228T013353_rk4_flat \
     results/20260228T230022_step_q60_rk-warm \
     results/20260228T202903_rough_spatial_rk4
+
+# 1b — failed trials
+uv run python -m analysis.l2_l4.H1.plot_contact_histogram \
+    results/20260228T013353_rk4_flat \
+    results/20260228T230022_step_q60_rk-warm \
+    results/20260228T202903_rough_spatial_rk4 --failed
 
 # 1a — single terrain, specific freq
 uv run python -m analysis.l2_l4.H1.plot_contact_raster \

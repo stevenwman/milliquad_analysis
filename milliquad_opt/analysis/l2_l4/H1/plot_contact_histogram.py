@@ -31,6 +31,7 @@ from analysis.l2_l4._plot_style import (
     TERRAIN_TITLES,
 )
 from analysis.l2_l4._trial_filter import (
+    SETTLE_TIME,
     active_mask,
     detect_terrain,
     find_npz,
@@ -44,18 +45,22 @@ N_BINS = N_LEG_BINS + 1  # +1 for body contact bin
 BIN_LABELS = ["0", "1", "2", "3", "4", "Body"]
 
 
-def _collect_histograms(run_dir: pathlib.Path):
+def _collect_histograms(run_dir: pathlib.Path, failed: bool = False):
     """Return per-trial histograms (leg bins + body bin) and trial counts.
+
+    Args:
+        failed: if True, collect FAILED trials instead of passing ones.
+                Uses time-only mask (no spatial gating) since robot may not
+                have reached the terrain region.
 
     Returns:
         hists:  {freq: {scene: (mean_hist, std_hist)}}  — shape (6,)
-        counts: {freq: {scene: (n_valid, n_total)}}
+        counts: {freq: {scene: (n_selected, n_total)}}
         freqs:  sorted list of frequencies
     """
     terrain = detect_terrain(run_dir)
     npz = np.load(find_npz(run_dir))
 
-    # Check if body contact data is available
     has_body = any("body_in_contact" in k for k in npz.files)
 
     trials: dict[tuple[str, float], list[int]] = {}
@@ -79,9 +84,16 @@ def _collect_histograms(run_dir: pathlib.Path):
             pitch = npz[f"{prefix}_pitch"]
             contact = npz[f"{prefix}_leg_in_contact"]
 
-            if not is_valid_trial(pos_x, pitch, terrain, scene, freq):
-                continue
-            mask = active_mask(time, pos_x, terrain)
+            valid = is_valid_trial(pos_x, pitch, terrain, scene, freq)
+            if failed and valid:
+                continue  # skip passing trials
+            if not failed and not valid:
+                continue  # skip failing trials
+
+            if failed:
+                mask = time >= SETTLE_TIME
+            else:
+                mask = active_mask(time, pos_x, terrain)
             if mask.sum() < 10:
                 continue
 
@@ -118,13 +130,21 @@ def _collect_histograms(run_dir: pathlib.Path):
     return hists, counts, all_freqs
 
 
-def plot(run_dirs: list[pathlib.Path], save: bool = True):
+def plot(run_dirs: list[pathlib.Path], save: bool = True, failed: bool = False):
     terrain_data = {}
     for rd in run_dirs:
         t = detect_terrain(rd)
-        terrain_data[t] = _collect_histograms(rd)
+        terrain_data[t] = _collect_histograms(rd, failed=failed)
 
-    terrain_order = [t for t in ["flat", "step", "rough"] if t in terrain_data]
+    # Drop terrains with no data (e.g. flat has zero failures)
+    terrain_order = [
+        t for t in ["flat", "step", "rough"]
+        if t in terrain_data and terrain_data[t][2]  # has any frequencies
+    ]
+
+    if not terrain_order:
+        print("No data to plot.")
+        return None
 
     # Unified frequency grid
     all_freqs = sorted(set(
@@ -217,7 +237,7 @@ def plot(run_dirs: list[pathlib.Path], save: bool = True):
             if row == 0:
                 ax.set_title(f"{freq:g} Hz", pad=14)
             if row == n_rows - 1:
-                ax.set_xlabel("Simultaneous leg contacts          Body")
+                ax.set_xlabel("Contact type")
 
         axes[row, 0].set_ylabel(f"{TERRAIN_TITLES.get(terrain, terrain)}\nFraction of timesteps")
 
@@ -229,7 +249,8 @@ def plot(run_dirs: list[pathlib.Path], save: bool = True):
     fig.legend(handles, labels, loc="upper right", frameon=False, fontsize=9,
                bbox_to_anchor=(0.99, 0.99))
 
-    fig.suptitle("H1: Simultaneous leg contacts + body contact by morphology & frequency",
+    mode = "FAILED trials" if failed else "passing trials"
+    fig.suptitle(f"H1: Leg + body contacts by morphology & frequency ({mode})",
                  fontsize=12, y=1.02)
     fig.tight_layout()
 
@@ -237,7 +258,8 @@ def plot(run_dirs: list[pathlib.Path], save: bool = True):
         FIGURE_DIR.mkdir(parents=True, exist_ok=True)
         ts = datetime.now().strftime("%Y%m%dT%H%M%S")
         terrain_tag = "_".join(terrain_order)
-        out = FIGURE_DIR / f"{ts}_contact_histogram_{terrain_tag}.png"
+        suffix = "_failed" if failed else ""
+        out = FIGURE_DIR / f"{ts}_contact_histogram_{terrain_tag}{suffix}.png"
         fig.savefig(out, dpi=200, bbox_inches="tight")
         print(f"Saved: {out}")
 
@@ -251,8 +273,10 @@ def main():
     )
     parser.add_argument("run_dirs", nargs="+", type=pathlib.Path)
     parser.add_argument("--no-save", action="store_true")
+    parser.add_argument("--failed", action="store_true",
+                        help="Show failed trials instead of passing ones.")
     args = parser.parse_args()
-    plot(args.run_dirs, save=not args.no_save)
+    plot(args.run_dirs, save=not args.no_save, failed=args.failed)
 
 
 if __name__ == "__main__":
