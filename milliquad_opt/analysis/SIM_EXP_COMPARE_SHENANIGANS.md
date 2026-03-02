@@ -11,7 +11,7 @@ Legacy standalone scripts (`plot_exp_vs_sim.py`, `plot_exp_vs_sim_pitch.py`) sti
 Wheel robot has failure modes that need different treatment on exp vs sim sides:
 
 ### Exp-only failures (sim doesn't reproduce)
-- **Flat WR f50**: Robot physically self-destructs at 50Hz in experiments. Sim happily runs at 720 mm/s because it doesn't model mechanical failure.
+- **Flat WR f50**: Robot physically self-destructs at 50Hz in experiments. Sim doesn't model mechanical failure. Exp: 709.4 ± 11.5 mm/s (n=3). Sim: 725.2 ± 13.2 mm/s (n=3 selected). ~2% sim-over-exp.
 - Treatment: exp panel gets shading tapered to 0 + X marker. Sim panel shows actual data (no X).
 
 ### Shared failures (both exp and sim)

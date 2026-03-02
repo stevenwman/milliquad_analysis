@@ -285,7 +285,7 @@ def main():
             # Subplot lettering: (a), (b), (c), ...
             letter = chr(ord('a') + letter_idx)
             ax.text(0.02, 0.95, f"({letter})", transform=ax.transAxes,
-                    fontsize=10, fontweight="bold", va="top", ha="left")
+                    fontsize=13, fontweight="bold", va="top", ha="left")
             letter_idx += 1
 
             # Sub-headers on top row only
