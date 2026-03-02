@@ -279,20 +279,29 @@ def _check_instability(model, data) -> None:
 
 
 def _extract_contact_data(model, data) -> dict:
-    """Extract per-leg contact summary from MuJoCo contact state.
+    """Extract per-leg and chassis contact summary from MuJoCo contact state.
 
     Returns dict with:
-        leg_in_contact:    (4,) bool
-        leg_normal_force:  (4,) float  — total normal force per leg (N)
-        leg_tangent_force: (4,) float  — total tangential force magnitude per leg (N)
-        leg_contact_pos:   (4,3) float — centroid of contact positions per leg (m)
-        total_ncon:        int         — total active contacts
+        leg_in_contact:      (4,) bool
+        leg_normal_force:    (4,) float  — total normal force per leg (N)
+        leg_tangent_force:   (4,) float  — total tangential force magnitude per leg (N)
+        leg_contact_pos:     (4,3) float — centroid of contact positions per leg (m)
+        body_in_contact:     bool        — chassis touching terrain?
+        body_normal_force:   float       — total normal force on chassis (N)
+        body_tangent_force:  float       — total tangential force on chassis (N)
+        total_ncon:          int         — total active contacts
     """
+    _CHASSIS_BODY = LEG_BODY_OFFSET - 1  # body 1
+
     leg_in_contact = np.zeros(4, dtype=bool)
     leg_normal_force = np.zeros(4)
     leg_tangent_force = np.zeros(4)
     leg_contact_pos_sum = np.zeros((4, 3))
     leg_contact_count = np.zeros(4, dtype=int)
+
+    body_in_contact = False
+    body_normal_force = 0.0
+    body_tangent_force = 0.0
 
     force_buf = np.zeros(6)  # reusable buffer for mj_contactForce
 
@@ -301,7 +310,15 @@ def _extract_contact_data(model, data) -> dict:
         body1 = model.geom_bodyid[contact.geom1]
         body2 = model.geom_bodyid[contact.geom2]
 
-        # Identify leg-terrain contact: one body is a leg (2-5), other is world (0)
+        # Chassis-terrain contact: body 1 vs world (0)
+        if (body1 == _CHASSIS_BODY and body2 == 0) or (body2 == _CHASSIS_BODY and body1 == 0):
+            mujoco.mj_contactForce(model, data, i, force_buf)
+            body_in_contact = True
+            body_normal_force += force_buf[0]
+            body_tangent_force += np.sqrt(force_buf[1] ** 2 + force_buf[2] ** 2)
+            continue
+
+        # Leg-terrain contact: one body is a leg (2-5), other is world (0)
         leg_idx = -1
         if LEG_BODY_OFFSET <= body1 < LEG_BODY_OFFSET + 4 and body2 == 0:
             leg_idx = body1 - LEG_BODY_OFFSET
@@ -311,7 +328,6 @@ def _extract_contact_data(model, data) -> dict:
             continue
 
         mujoco.mj_contactForce(model, data, i, force_buf)
-        # force_buf: [normal, t1, t2, torsional, r1, r2] in contact frame
         leg_in_contact[leg_idx] = True
         leg_normal_force[leg_idx] += force_buf[0]
         leg_tangent_force[leg_idx] += np.sqrt(force_buf[1] ** 2 + force_buf[2] ** 2)
@@ -329,6 +345,9 @@ def _extract_contact_data(model, data) -> dict:
         "leg_normal_force": leg_normal_force,
         "leg_tangent_force": leg_tangent_force,
         "leg_contact_pos": leg_contact_pos,
+        "body_in_contact": body_in_contact,
+        "body_normal_force": body_normal_force,
+        "body_tangent_force": body_tangent_force,
         "total_ncon": int(data.ncon),
     }
 

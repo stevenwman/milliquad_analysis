@@ -68,38 +68,53 @@ def _store_trajectory_arrays(
     """Extract all raw timeseries from trajectory and store in traj_arrays dict.
 
     Stores under keys: {traj_key}_{field} for each field.
+    Float arrays stored as float32 (~6e-8 relative error, halves file size).
     """
+    f32 = np.float32
+
     # Kinematics (always present)
-    traj_arrays[f"{traj_key}_time"] = np.array([s["time"] for s in traj])
-    traj_arrays[f"{traj_key}_pos_x"] = np.array([s["pos"][0] for s in traj])
-    traj_arrays[f"{traj_key}_pos_y"] = np.array([s["pos"][1] for s in traj])
-    traj_arrays[f"{traj_key}_pos_z"] = np.array([s["pos"][2] for s in traj])
-    traj_arrays[f"{traj_key}_vel_x"] = np.array([s["vel"][0] for s in traj])
-    traj_arrays[f"{traj_key}_vel_y"] = np.array([s["vel"][1] for s in traj])
-    traj_arrays[f"{traj_key}_vel_z"] = np.array([s["vel"][2] for s in traj])
-    traj_arrays[f"{traj_key}_pitch"] = compute_pitch_series(traj)
-    traj_arrays[f"{traj_key}_joint_pos"] = np.array([s["joint_pos"] for s in traj])  # (T, 4)
+    traj_arrays[f"{traj_key}_time"] = np.array([s["time"] for s in traj], dtype=f32)
+    traj_arrays[f"{traj_key}_pos_x"] = np.array([s["pos"][0] for s in traj], dtype=f32)
+    traj_arrays[f"{traj_key}_pos_y"] = np.array([s["pos"][1] for s in traj], dtype=f32)
+    traj_arrays[f"{traj_key}_pos_z"] = np.array([s["pos"][2] for s in traj], dtype=f32)
+    traj_arrays[f"{traj_key}_vel_x"] = np.array([s["vel"][0] for s in traj], dtype=f32)
+    traj_arrays[f"{traj_key}_vel_y"] = np.array([s["vel"][1] for s in traj], dtype=f32)
+    traj_arrays[f"{traj_key}_vel_z"] = np.array([s["vel"][2] for s in traj], dtype=f32)
+    traj_arrays[f"{traj_key}_pitch"] = compute_pitch_series(traj).astype(f32)
+    traj_arrays[f"{traj_key}_joint_pos"] = np.array(
+        [s["joint_pos"] for s in traj], dtype=f32)  # (T, 4)
 
     # Drive angle (from step_cache — present when magnetic forces applied)
     if "drive_angle" in traj[0]:
-        traj_arrays[f"{traj_key}_drive_angle"] = np.array([s["drive_angle"] for s in traj])
+        traj_arrays[f"{traj_key}_drive_angle"] = np.array(
+            [s["drive_angle"] for s in traj], dtype=f32)
 
     # External torques (for power/COT recomputation)
     if "tau_ext" in traj[0]:
-        traj_arrays[f"{traj_key}_tau_ext"] = np.array([s["tau_ext"] for s in traj])  # (T, 4, 3)
+        traj_arrays[f"{traj_key}_tau_ext"] = np.array(
+            [s["tau_ext"] for s in traj], dtype=f32)  # (T, 4, 3)
 
     # Contact data (from _extract_contact_data)
     if "leg_in_contact" in traj[0]:
         traj_arrays[f"{traj_key}_leg_in_contact"] = np.array(
-            [s["leg_in_contact"] for s in traj])  # (T, 4)
+            [s["leg_in_contact"] for s in traj], dtype=bool)  # (T, 4)
         traj_arrays[f"{traj_key}_leg_normal_force"] = np.array(
-            [s["leg_normal_force"] for s in traj])  # (T, 4)
+            [s["leg_normal_force"] for s in traj], dtype=f32)  # (T, 4)
         traj_arrays[f"{traj_key}_leg_tangent_force"] = np.array(
-            [s["leg_tangent_force"] for s in traj])  # (T, 4)
+            [s["leg_tangent_force"] for s in traj], dtype=f32)  # (T, 4)
         traj_arrays[f"{traj_key}_leg_contact_pos"] = np.array(
-            [s["leg_contact_pos"] for s in traj])  # (T, 4, 3)
+            [s["leg_contact_pos"] for s in traj], dtype=f32)  # (T, 4, 3)
         traj_arrays[f"{traj_key}_total_ncon"] = np.array(
-            [s["total_ncon"] for s in traj])  # (T,)
+            [s["total_ncon"] for s in traj], dtype=np.int16)  # (T,)
+
+    # Chassis-terrain contact (from _extract_contact_data)
+    if "body_in_contact" in traj[0]:
+        traj_arrays[f"{traj_key}_body_in_contact"] = np.array(
+            [s["body_in_contact"] for s in traj], dtype=bool)  # (T,)
+        traj_arrays[f"{traj_key}_body_normal_force"] = np.array(
+            [s["body_normal_force"] for s in traj], dtype=f32)  # (T,)
+        traj_arrays[f"{traj_key}_body_tangent_force"] = np.array(
+            [s["body_tangent_force"] for s in traj], dtype=f32)  # (T,)
 
 
 def _load_exploratory_rough_conditions(

@@ -6,7 +6,7 @@ The "scene #" refers to the number of spokes on a leg connected to the hip joint
 - **Scene1**: Single leg (standard single-spoke configuration)
 - **Scene2**: 2 legs 180° apart (2-spoke)
 - **Scene4**: 4 spokes 90° apart (4-spoke)
-- **Wheel**: Continuous cylindrical contact
+- **Wheel**: Continuous cylindrical contact (note: MuJoCo model uses 4 discrete mesh bodies with the same joint topology as spoke robots — body IDs 2-5 map to 4 wheel segments, so per-leg contact data represents per-segment data for wheel)
 
 The robot is ~6mm, magnetically actuated via an external rotating field. Rough terrain has ~1mm std roughness — a 17% obstacle-to-body ratio, right in the transition zone where locomotion strategy matters most.
 
@@ -26,6 +26,7 @@ More spokes = more contact opportunities per revolution. On rough terrain where 
 - If scene4 duty factor >> scene1 duty factor on rough terrain → supports contact redundancy hypothesis
 - Compare flat vs rough: if duty factor drops more for scene1 than scene4 on rough → multi-spoke is robust to terrain
 - Simultaneous contact count histogram: scene4 should peak at 2-3 simultaneous contacts, scene1 at 0-1
+- **Wheel as limit case**: Wheel's cylindrical mesh geometry should produce higher duty factor than spoke designs, though the 4-body discretization in MuJoCo means it won't be a perfect continuous contact — expect high but not necessarily 100%. If scene4 duty factor is already near wheel levels, contact redundancy saturates early. If wheel duty factor drops on rough terrain despite smooth geometry, discrete spokes may offer terrain-adaptive advantages that continuous surfaces don't.
 
 Literature: Whegs research (Quinn et al. 2003), HAMR insect-scale robot (Goldberg et al. 2018).
 
@@ -42,6 +43,7 @@ At this scale, controlled slipping may help. Multi-spoke designs distribute prop
 - If slip fraction is similar but scene4 has higher normal forces per contact → multi-spoke "presses harder" into terrain (weight distributed = each contact lighter, but more contacts = more total friction budget)
 - If scene4 shows periodic slip synchronized with drive phase → controlled slip-and-catch gait (biological analogue: cockroach high-speed running)
 - Interesting to compare flat vs rough: does rough terrain push more contacts into slip for all morphologies, or selectively?
+- **Wheel as limit case**: Wheel spreads force over a larger contact area than spokes (cylindrical mesh vs point-like tips), though simulated as 4 discrete bodies. If wheel has *lower* slip fraction than all spoke designs → smooth geometry distributes force better. If wheel has *higher* slip on rough terrain → the smooth surface slides over asperities instead of gripping them, and discrete spokes that dig into terrain features outperform smooth geometry.
 
 Literature: Full & Koditschek (1999), Goldman et al. (2006) — cockroach slip-and-catch.
 
@@ -60,6 +62,7 @@ Multi-spoke designs produce smoother forward velocity within each revolution. Si
 - FFT: scene1 should show strong peak at 1× drive freq. Scene4 should show peak at 4× (or spread). The ratio of 1× harmonic amplitude between morphologies quantifies how much smoother propulsion is.
 - Compare flat vs rough: if rough terrain *increases* ripple for scene1 but not scene4 → multi-spoke provides terrain noise rejection
 - This is distinct from duty factor (H1): duty factor is a contact-level binary, velocity ripple is a kinematic outcome. A robot could have high duty factor but still have high ripple if contacts are unproductive.
+- **Wheel as limit case**: Wheel's smooth geometry should produce lower ripple than spoke designs (fewer discrete thrust pulses), though the 4-body discretization may still introduce some periodicity. If scene4 ripple is already near wheel levels → propulsive smoothing saturates by 4 spokes. If wheel ripple *increases* on rough terrain while scene4 stays stable → discrete spokes provide better terrain noise rejection than smooth geometry.
 
 **Note**: Can compute from existing NPZ data (diff(pos_x)/diff(time)). No re-run needed for this analysis alone.
 
@@ -77,6 +80,7 @@ All legs see the same magnetic drive field. With more spokes, the net propulsive
 - If modulation depth is SIMILAR across morphologies → advantage comes from something else (H1/H2), not phase distribution
 - Critical comparison: flat vs rough. If rough terrain *destroys* phase structure for scene1 (modulation collapses to noise) but scene4 retains it → "more spokes = better terrain noise rejection" (smoking gun for this hypothesis)
 - Could also plot as polar plot: drive angle on θ, mean acceleration on r. Scene1 = elongated ellipse, scene4 = near-circle
+- **Wheel as limit case**: Wheel should show weaker phase-locking than spoke designs (smooth geometry reduces angular preference), though the 4-body structure may retain some phase sensitivity. If spoke designs approach wheel's R-squared with increasing spoke count, the trend 1-spoke → 2-spoke → 4-spoke → wheel traces out a phase-averaging curve.
 
 **Note**: drive_angle is NOT in current NPZ (only time, pos_x, pitch). Requires augmented validation re-run.
 
@@ -108,6 +112,7 @@ Where on the terrain surface are contacts happening? Different morphologies may 
 - If contact positions are similar → differences come from force/timing, not position
 - A scatter plot of contact (x,z) colored by morphology overlaid on terrain cross-section could be visually compelling
 - Could also compute "effective ground clearance" = mean contact z - mean terrain z in contact region
+- **Wheel as limit case**: Wheel's cylindrical mesh contacts terrain over a broader area than spoke tips, though MuJoCo resolves this as discrete contact points across 4 bodies. Contact position distribution should be smoother/denser than spokes. If wheel contacts cluster at terrain peaks (rides on top) while spoke contacts reach into valleys (dig in), that's a geometric explanation for why discrete spokes grip rough terrain better — they access terrain features that smooth geometry skates over.
 
 **Note**: Requires `leg_contact_pos` from augmented recording.
 
@@ -174,8 +179,11 @@ Currently saves: `{rid}_t{trial}_{time,pos_x,pitch}` (3 arrays per trial).
 | `_leg_tangent_force` | (T, 4) | NEW from Step 2 | slip fraction (H2) |
 | `_leg_contact_pos` | (T, 4, 3) | NEW from Step 2 | contact mapping (H6) |
 | `_total_ncon` | (T,) | NEW from Step 2 | contact count stats |
+| `_body_in_contact` | (T,) | Step 2 v2 | chassis belly-drag detection |
+| `_body_normal_force` | (T,) | Step 2 v2 | chassis contact force |
+| `_body_tangent_force` | (T,) | Step 2 v2 | chassis friction/drag force |
 
-**Estimated size**: ~50 floats/step × 4000 steps × 8 bytes = 1.6 MB/trial uncompressed.
+**Estimated size**: ~53 floats/step × 4000 steps × 8 bytes = ~1.7 MB/trial uncompressed.
 - Flat: 80 trials → ~130 MB uncompressed, ~40 MB compressed
 - Rough: 120 trials → ~190 MB uncompressed, ~60 MB compressed
 
@@ -299,11 +307,213 @@ No velocity, no drive_angle, no contact data. **Only H3 (velocity ripple via dif
 
 ---
 
+## Progress Log
+
+### Step 1: Back up files — DONE (2026-03-02)
+- `simulation.py.bak` and `validate_params.py.bak` created
+
+### Step 2: Add contact recording to simulation.py — DONE (2026-03-02)
+- Added `_extract_contact_data(model, data)` helper (~50 lines)
+- Updated `_record_state` signature: `(trajectory, data, step_cache)` → `(trajectory, model, data, step_cache)`
+- Fixed monkey-patch in `energy_analysis.py` to match new signature
+- New fields per timestep: `leg_in_contact` (4,), `leg_normal_force` (4,), `leg_tangent_force` (4,), `leg_contact_pos` (4,3), `total_ncon` (int)
+
+### Step 3: Augment validate_params.py — DONE (2026-03-02)
+- Added `_store_trajectory_arrays()` helper with float32 casting (16 field types per trial)
+- Added datetime prefix to output filenames (prevents overwriting old data)
+- Float32 casting: 2× size reduction vs float64, max relative error ~6e-8 (f32 machine epsilon)
+
+### Step 4: Run validation — NEEDS RE-RUN (body contact fields added)
+
+Previous run produced 16 fields/trial. New run will produce 19 fields/trial (added `body_in_contact`, `body_normal_force`, `body_tangent_force`). Datetime prefix preserves old files.
+
+**Previous NPZ files** (16 fields, still valid for leg-only analysis):
+- Flat: `20260302T123027_validation_trajectories.npz` (50 MB, 80 trials × 16 fields)
+- Step: `20260302T123511_validation_trajectories.npz` (69 MB, 60 trials × 16 fields)
+- Rough: `20260302T123742_validation_trajectories.npz` (47 MB, 120 trials × 16 fields)
+
+**Re-run commands** (from `milliquad_opt/`):
+```bash
+uv run python -m analysis.validate_params results/20260228T013353_rk4_flat --csv
+uv run python -m analysis.validate_params results/20260228T230022_step_q60_rk-warm --csv
+uv run python -m analysis.validate_params results/20260228T202903_rough_spatial_rk4 --csv --n-trials 10 --n-select 5
+```
+
+**Parity note** (from first run): All shared fields (time, pos_x, pitch) matched old NPZ files within f32 tolerance across all three terrains (240/240 flat, 180/180 step, 360/360 rough).
+
+### Step 5: Analysis scripts — DONE (2026-03-02)
+
+All scripts in `analysis/l2_l4/` subfolder (self-contained, do NOT touch `_common.py` or existing plotting pipeline).
+
+**Shared module**: `_trial_filter.py` — consistent trial validation and spatial gating across all scripts.
+- `is_valid_trial()`: gate-clearing (GATE_END) + inversion check (pitch std > 30°)
+- `active_mask()`: flat = `time >= 0.1s`, rough = time + spatial `[0.005, 0.14)`, step = spatial `[0.05, 0.096)`
+- Constants mirror `plot_validation.py` (GATE_END, GATE_EXEMPT, INVERTED_PITCH_THRESHOLD)
+
+**Scripts** (all support multi-dir cross-terrain comparison):
+
+| Script | Hypothesis | Key metric | Status |
+|---|---|---|---|
+| `contact_duty_factor.py` | H1 | Duty factor, simultaneous contact histogram | Tested flat/step/rough |
+| `contact_slip_analysis.py` | H2 | Slip fraction (F_t / mu·F_n >= 0.95) | Tested flat/rough |
+| `velocity_ripple.py` | H3 | Ripple coefficient, FFT amplitude at 1× drive freq | Tested flat/rough |
+| `phase_propulsion.py` | H4 | Phase R² (var(bin_means)/var(ax)), amplitude, peak phase | Tested flat/rough |
+| `contact_position_map.py` | H6 | Mean contact z/y position, spatial distribution | Tested flat/rough |
+
+**Usage** (from `milliquad_opt/`):
+```bash
+uv run python -m analysis.l2_l4.contact_duty_factor results/20260228T013353_rk4_flat results/20260228T202903_rough_spatial_rk4
+```
+
+---
+
+## Lessons Learned
+
+1. **Float32 is sufficient for all physical quantities in this simulation.** Max relative error from f64→f32 cast is ~6e-8 across all fields (time, position, pitch, velocity, torque, contact forces). Saves 2× storage with zero practical accuracy loss.
+
+2. **HDF5 shuffle+gzip adds negligible benefit over NPZ for this data.** Benchmarked NPZ f64, NPZ f32, HDF5 gzip f64/f32/f32+gzip9. Float32 cast dominates the size reduction (~2×). HDF5 shuffle on top of f32 gives only ~3% additional compression. Not worth the h5py dependency.
+
+3. **Datetime-prefixed filenames prevent accidental data loss.** Old NPZ/CSV files are preserved alongside new ones. Critical when iterating on recording format — can always diff old vs new.
+
+4. **`_record_state` signature change propagates to monkey-patches.** `energy_analysis.py` patches `_record_state` to add energy recording. Adding `model` parameter broke it silently until tested. Any future signature changes need grep for `_record_state` across codebase.
+
+5. **Contact force API**: `mujoco.mj_contactForce(model, data, i, result)` returns 6D vector in contact frame. `result[0]` = normal (≥0), `result[1:3]` = tangential. Must map geom→body via `model.geom_bodyid` to identify which leg is involved.
+
+6. **Trial filtering is essential for terrain analysis.** Without gate-clearing and spatial gating, rough terrain metrics are contaminated by post-terrain acceleration on flat ground, and step terrain by cliff-fall artifacts. The existing plotting pipeline (plot_validation.py) had already solved this — reuse the same constants.
+
+7. **Phase-propulsion modulation depth is a broken metric.** `(max_bin - min_bin) / mean_accel` explodes at steady state because mean acceleration ≈ 0. Phase R² = `var(bin_means) / var(all_ax)` is bounded [0,1] and directly interpretable as "fraction of acceleration variance explained by drive phase."
+
+8. **Keep analysis scripts self-contained from existing pipelines.** `_common.py` controls plotting infrastructure — modifying it for prototype analysis risks breaking production plots. Created `analysis/l2_l4/_trial_filter.py` as a local shared module instead.
+
+9. **Wheel model shares leg topology with spoke robots.** The wheel MJCF (`robot_wheel.xml`) has 4 hinge joints (FR/FL/BR/BL) and 4 bodies at IDs 2-5, same as spoke models. `_extract_contact_data` maps these as "legs" — so wheel's per-leg arrays represent per-wheel-segment data. No code changes needed, but interpret wheel's `leg_in_contact`, force, and position arrays as segment-level, not limb-level. H3 and H4 (velocity ripple, phase-propulsion) don't use contact arrays and are unaffected.
+
+---
+
+## Step 6: Plotting & Visualization Plan
+
+### Data Inventory
+
+| Terrain | Morphologies | Frequencies | Trials/combo | Total trials |
+|---|---|---|---|---|
+| Flat | 1-spoke, 2-spoke, 4-spoke, wheel | 10, 20, 30, 50 Hz | 5 | 80 |
+| Step | 1-spoke, 2-spoke, 4-spoke, wheel | 10, 20, 30 Hz | 5 | 60 |
+| Rough | 1-spoke, 2-spoke, 4-spoke, wheel | 10, 30, 50 Hz | 10 | 120 |
+
+**16 fields per trial**: time, pos_x/y/z, vel_x/y/z, pitch, drive_angle, joint_pos(4), leg_in_contact(4), leg_normal_force(4), leg_tangent_force(4), leg_contact_pos(4,3), total_ncon, tau_ext(4,3)
+
+### Raw Plots per Hypothesis
+
+#### H1: Contact Redundancy / Duty Factor
+**Fields**: `leg_in_contact` (T, 4) bool
+
+| # | Plot | What it shows | Axes |
+|---|---|---|---|
+| 1a | Contact raster | Per-leg on/off timeline for one trial | x=time, y=leg_id, color=in_contact |
+| 1b | Simultaneous contact histogram | Distribution of 0/1/2/3/4 legs in contact | x=n_legs, y=fraction, grouped by morphology |
+| 1c | Duty factor by freq | Duty factor (>=1 leg) per morphology across frequencies | x=freq, y=duty_factor, lines=morphology |
+| 1d | Contact count timeseries | How many legs in contact over time | x=time, y=count(0-4), one line per morphology |
+
+#### H2: Slip vs Grip
+**Fields**: `leg_normal_force`, `leg_tangent_force`, `leg_in_contact`
+
+| # | Plot | What it shows | Axes |
+|---|---|---|---|
+| 2a | Slip ratio histogram | Distribution of F_t/(mu*F_n) across all contacts | x=ratio(0-1+), y=density, one curve per morphology |
+| 2b | F_t vs F_n scatter | Each contact as a point, with friction cone line | x=F_n, y=F_t, color=morphology, line=mu*F_n |
+| 2c | Slip fraction by freq | Fraction of contacts at >0.95 slip | x=freq, y=slip_frac, lines=morphology |
+| 2d | Normal force distribution | How hard each leg pushes | x=F_n, y=density, per morphology |
+
+#### H3: Velocity Ripple
+**Fields**: `vel_x`, `drive_angle`, `time`
+
+| # | Plot | What it shows | Axes |
+|---|---|---|---|
+| 3a | Phase-folded velocity | vel_x overlaid on one drive revolution | x=drive_phase(0-2pi), y=vel_x, per morphology |
+| 3b | FFT power spectrum | Harmonics of drive frequency in velocity | x=freq_ratio(1x,2x,4x), y=amplitude, per morphology |
+| 3c | Ripple coefficient by freq | Intra-cycle std/mean across drive freqs | x=freq, y=ripple, lines=morphology |
+| 3d | Raw velocity timeseries | vel_x over time showing oscillation pattern | x=time, y=vel_x, one representative trial per morph |
+
+#### H4: Phase-Propulsion Correlation
+**Fields**: `vel_x`, `drive_angle`, `time`
+
+| # | Plot | What it shows | Axes |
+|---|---|---|---|
+| 4a | Phase-averaged acceleration | Mean ax in 10-deg drive phase bins | x=phase(0-360), y=mean_ax, per morphology |
+| 4b | Polar propulsion plot | Same as 4a but on polar axes | theta=phase, r=ax, per morphology |
+| 4c | Phase R-squared by freq | How much acceleration is phase-locked | x=freq, y=R2, lines=morphology |
+| 4d | Phase-acceleration heatmap | 2D density of (phase, ax) per morphology | x=phase, y=ax, color=density |
+
+#### H6: Contact Position Mapping
+**Fields**: `leg_contact_pos` (T,4,3), `leg_in_contact`
+
+| # | Plot | What it shows | Axes |
+|---|---|---|---|
+| 6a | Contact scatter (x,z) | Where on terrain legs touch | x=pos_x, y=pos_z, color=morphology |
+| 6b | Contact height histogram | Distribution of contact z | x=z_mm, y=density, per morphology |
+| 6c | Contact y spread | Lateral distribution of contacts | x=pos_y, y=density, per morphology |
+
+### Summary / Comparative Analysis (cross-hypothesis)
+
+| # | Analysis | Question it answers |
+|---|---|---|
+| S1 | Terrain degradation matrix | For each metric x morphology: (rough - flat) / flat. Who degrades least? |
+| S2 | Morphology scorecard | One row per morphology, columns = all metrics. Normalized 0-1 (best=1). Radar/spider chart possible. |
+| S3 | Duty factor vs velocity | Does higher duty factor → higher velocity? Scatter across all (morph, freq, terrain) combos. |
+| S4 | Slip fraction vs ripple | Does more slip → more velocity oscillation? Correlation across conditions. |
+| S5 | Phase R-squared vs duty factor | Is phase-locked propulsion related to contact regularity? |
+| S6 | Freq scaling | How does each metric scale with drive frequency? All metrics on one freq-axis figure, faceted by morphology. |
+| S7 | Step vs rough comparison | Same metrics on step terrain — does morphology ranking change between obstacle types? |
+
+---
+
+## Step 7: Hypothesis Plotting — STARTED (2026-03-02)
+
+### Folder structure
+
+Plotting scripts organized by hypothesis under `analysis/l2_l4/H{n}/`, with timestamped outputs in `figures/` subfolders. Shared style in `analysis/l2_l4/_plot_style.py`.
+
+```
+analysis/l2_l4/
+  _plot_style.py              # MORPH_COLORS, MORPH_LABELS, rcParams (new)
+  _trial_filter.py            # trial validation + gating (existing)
+  contact_duty_factor.py      # text-output analysis (existing)
+  H1/
+    __init__.py
+    plot_contact_histogram.py  # 1b — grouped bar chart, flat/step/rough
+    plot_contact_raster.py     # 1a — per-leg on/off raster, sanity check
+    figures/                   # timestamped PNGs
+```
+
+### H1 plots — DONE (2026-03-02)
+
+**1b: Simultaneous contact histogram** (`plot_contact_histogram.py`)
+- Grouped bars: x = 0–4 simultaneous contacts, y = fraction of timesteps, grouped by morphology
+- One panel per terrain (flat | step | rough), all freqs pooled
+- Key observation: all morphologies peak at 0 contacts. L1 has highest zero-contact fraction (~65% flat, ~62% rough). WR distributes more evenly across 1–4. L4 and WR show notably more 2–3 simultaneous contacts than L1.
+
+**1a: Contact raster** (`plot_contact_raster.py`)
+- Per-leg on/off heatmap for one representative trial (median duty factor) per morphology
+- Picks highest available frequency by default, configurable with `--freq`
+- Key observation: L1 contacts are "lumpy" — sustained blocks on 1–2 legs with long dead zones. WR has dense rapid-fire contacts. L4 is intermediate — sparser per leg but more temporal overlap.
+
+**Usage** (from `milliquad_opt/`):
+```bash
+# 1b — all three terrains
+uv run python -m analysis.l2_l4.H1.plot_contact_histogram \
+    results/20260228T013353_rk4_flat \
+    results/20260228T230022_step_q60_rk-warm \
+    results/20260228T202903_rough_spatial_rk4
+
+# 1a — single terrain, specific freq
+uv run python -m analysis.l2_l4.H1.plot_contact_raster \
+    results/20260228T202903_rough_spatial_rk4 --freq 30
+```
+
+---
+
 ## Notes
 
 - Literature citations are from training knowledge (through May 2025) — verify exact titles/years via Google Scholar before manuscript use
 - Rough terrain is deterministic (seed=42), so re-running with augmented recording reproduces identical terrain
-- H3 (velocity ripple) can run on existing NPZ data (diff(pos_x)). All other hypotheses require re-run.
-- H4 (phase-propulsion) needs `drive_angle` which is NOT in current NPZ.
-- All analysis scripts are pure post-processing on NPZ files — no simulation dependency after Step 4.
-- The augmented NPZ is designed to capture ALL data needed for H1-H6 so we only re-run validation once.
+- All analysis scripts are pure post-processing on NPZ files — no simulation dependency after Step 4
+- The augmented NPZ captures ALL data needed for H1-H6 so we only re-run validation once
