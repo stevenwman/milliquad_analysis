@@ -24,6 +24,7 @@ import matplotlib
 matplotlib.rcParams["font.family"] = "TeX Gyre Pagella"
 matplotlib.rcParams["font.size"] = 14
 import matplotlib.pyplot as plt
+from matplotlib.ticker import MaxNLocator
 import numpy as np
 
 from analysis._common import detect_terrain
@@ -96,8 +97,6 @@ def build_plot_data(rows: list[dict], metric: str,
         valid = [r for r in valid if r.get("selected", False)]
     if exclude_stalled:
         valid = [r for r in valid if not r.get("stalled", False)]
-    if exclude_invalid:
-        valid = [r for r in valid if _is_valid_trial(r, gate_end)]
     if min_vx is not None:
         valid = [r for r in valid if r["vx"] is not None and abs(r["vx"]) >= min_vx]
 
@@ -114,21 +113,38 @@ def build_plot_data(rows: list[dict], metric: str,
 
         for freq in freqs:
             freq_rows = [r for r in scene_rows if r["freq"] == freq]
-            if metric == "vx":
-                vals = [r["vx"] * 1000 for r in freq_rows if r["vx"] is not None]
-            elif metric == "pitch_rms":
-                vals = [r["pitch_rms"] for r in freq_rows if r["pitch_rms"] is not None]
-            else:
-                vals = [r["cot"] for r in freq_rows if r["cot"] is not None]
+            
+            freq_vals_valid = []
+            
+            for r in freq_rows:
+                is_valid = _is_valid_trial(r, gate_end)
+                if exclude_invalid and not is_valid:
+                    # Plot as failure (X marker at 0.0) but don't include in means
+                    trial_freqs.append(freq)
+                    trial_vals.append(0.0)
+                    continue
 
-            if not vals:
-                continue
+                if metric == "vx":
+                    v = r["vx"] * 1000 if r["vx"] is not None else None
+                elif metric == "pitch_rms":
+                    v = r["pitch_rms"]
+                else:
+                    v = r["cot"]
 
-            trial_freqs.extend([freq] * len(vals))
-            trial_vals.extend(vals)
-            mean_freqs.append(freq)
-            means.append(float(np.mean(vals)))
-            stds.append(float(np.std(vals, ddof=1)) if len(vals) > 1 else 0.0)
+                if v is not None:
+                    trial_freqs.append(freq)
+                    trial_vals.append(v)
+                    freq_vals_valid.append(v)
+
+            if not freq_vals_valid and trial_freqs and trial_freqs[-1] == freq:
+                # All trials failed, still need mean_freqs for x-axis ticking
+                mean_freqs.append(freq)
+                means.append(0.0)
+                stds.append(0.0)
+            elif freq_vals_valid:
+                mean_freqs.append(freq)
+                means.append(float(np.mean(freq_vals_valid)))
+                stds.append(float(np.std(freq_vals_valid, ddof=1)) if len(freq_vals_valid) > 1 else 0.0)
 
         data[scene] = {
             "freqs": trial_freqs,
@@ -167,23 +183,23 @@ def strip_freqs(data: dict, freqs_to_remove: list[float]):
 
 def build_all_failed_freqs(rows: list[dict],
                            selected_only: bool = False,
-                           gate_end: float | None = None) -> dict[str, list[float]]:
+                           gate_end: float | None = None) -> dict[str, dict[float, int]]:
     """Find (scene, freq) combos where ALL trials are invalid (didn't clear gate or inverted).
 
-    Returns {scene: [freq1, freq2, ...]} for use as X markers on plots.
+    Returns {scene: {freq: count}} for use as X markers with counts on plots.
     """
     valid = [r for r in rows if not r["crash"]]
     if selected_only:
         valid = [r for r in valid if r.get("selected", False)]
 
-    failed: dict[str, list[float]] = {}
+    failed: dict[str, dict[float, int]] = {}
     for scene in PLOT_ORDER:
         scene_rows = [r for r in valid if r["scene"] == scene]
         freqs = sorted(set(r["freq"] for r in scene_rows))
         for freq in freqs:
             freq_rows = [r for r in scene_rows if r["freq"] == freq]
             if freq_rows and all(not _is_valid_trial(r, gate_end) for r in freq_rows):
-                failed.setdefault(scene, []).append(freq)
+                failed.setdefault(scene, {})[freq] = len(freq_rows)
     return failed
 
 
@@ -203,7 +219,7 @@ def plot_panel(
     title: str,
     ylabel: str,
     failures: dict[str, list[float]] | None = None,
-    all_failed: dict[str, list[float]] | None = None,
+    all_failed: dict[str, dict[float, int]] | None = None,
     scatter_only: bool = False,
 ):
     """Plot one terrain panel with shaded std bands and scatter dots.
@@ -215,7 +231,7 @@ def plot_panel(
         horizontal spreading (sorted by value, left-to-right lowest-to-highest).
     """
     n = len(PLOT_ORDER)
-    dodge_width = 1.2  # total spread in Hz (non-scatter mode)
+    dodge_width = 3.5  # total spread in Hz (non-scatter mode)
     scatter_dodge_width = 15.0  # wider spread for scatter_only (freq ticks 20 Hz apart)
     intra_spread = 3.0  # Hz, spread within one morphology's slot (scatter_only)
     # morphology gap = 15/3 = 5 Hz; clearance = 5 - 3 = 2 Hz
@@ -231,28 +247,38 @@ def plot_panel(
             # Trials with value <= 0 are plotted as X markers (n/a / failure)
             scatter_x: list[float] = []
             scatter_y: list[float] = []
-            fail_x: list[float] = []
+            fail_counts: dict[float, int] = {}  # freq → count of failed trials
             unique_freqs = sorted(set(d["freqs"]))
             for freq in unique_freqs:
                 vals = sorted(v for f, v in zip(d["freqs"], d["trials"]) if f == freq)
-                nt = len(vals)
+                n_fail = sum(1 for v in vals if v <= 0)
+                valid_vals = [v for v in vals if v > 0]
+                nt = len(valid_vals)
                 if nt == 1:
                     offsets = [0.0]
-                else:
+                elif nt > 1:
                     offsets = np.linspace(-intra_spread / 2, intra_spread / 2, nt).tolist()
-                for off, val in zip(offsets, vals):
-                    if val > 0:
-                        scatter_x.append(freq + dx + off)
-                        scatter_y.append(val)
-                    else:
-                        fail_x.append(freq + dx + off)
+                else:
+                    offsets = []
+                for off, val in zip(offsets, valid_vals):
+                    scatter_x.append(freq + dx + off)
+                    scatter_y.append(val)
+                if n_fail > 0:
+                    fail_counts[freq] = n_fail
             if scatter_x:
                 ax.scatter(scatter_x, scatter_y, color=COLORS[scene], alpha=0.6, s=30,
                            zorder=3, label=LABELS[scene])
-            if fail_x:
-                ax.plot(fail_x, [0] * len(fail_x), "x", color=COLORS[scene],
+            has_label = bool(scatter_x)
+            for freq, n_fail in fail_counts.items():
+                fx = freq + dx
+                ax.plot(fx, 0, "x", color=COLORS[scene],
                         markersize=8, markeredgewidth=2, zorder=5,
-                        label=LABELS[scene] if not scatter_x else None)
+                        label=LABELS[scene] if not has_label else None)
+                has_label = True
+                if n_fail > 1:
+                    ax.annotate(str(n_fail), (fx, 0), textcoords="offset points",
+                                xytext=(0, 6), ha="center", va="bottom",
+                                fontsize=14, fontweight="bold", color=COLORS[scene])
         else:
             freq_arr = np.array(d["mean_freqs"]) + dx
             mean = np.array(d["means"])
@@ -261,8 +287,24 @@ def plot_panel(
                 freq_arr, mean - std, mean + std,
                 color=COLORS[scene], alpha=0.2, label=LABELS[scene],
             )
-            scatter_freqs = np.array(d["freqs"]) + dx
-            ax.scatter(scatter_freqs, d["trials"], color=COLORS[scene], alpha=0.6, s=30, zorder=3)
+            freqs_arr = np.array(d["freqs"])
+            trials_arr = np.array(d["trials"])
+            valid_mask = trials_arr > 0
+            if valid_mask.any():
+                ax.scatter(freqs_arr[valid_mask] + dx, trials_arr[valid_mask],
+                           color=COLORS[scene], alpha=0.6, s=30, zorder=3)
+            # Collapse per-trial failures into one X + count per freq
+            if (~valid_mask).any():
+                fail_freqs = freqs_arr[~valid_mask]
+                for uf in sorted(set(fail_freqs)):
+                    nf = int(np.sum(fail_freqs == uf))
+                    fx = uf + dx
+                    ax.plot(fx, 0, "x", color=COLORS[scene],
+                            markersize=8, markeredgewidth=2, zorder=5)
+                    if nf > 1:
+                        ax.annotate(str(nf), (fx, 0), textcoords="offset points",
+                                    xytext=(0, 6), ha="center", va="bottom",
+                                    fontsize=14, fontweight="bold", color=COLORS[scene])
 
     # X markers for target=0 failure modes (dodged by morphology)
     if failures:
@@ -279,20 +321,26 @@ def plot_panel(
 
     # X markers for all-invalid (scene, freq) combos (dodged by morphology)
     if all_failed:
-        for scene, freqs in all_failed.items():
+        for scene, freq_counts in all_failed.items():
             if scene in COLORS and scene in PLOT_ORDER:
                 idx = PLOT_ORDER.index(scene)
                 dw = scatter_dodge_width if scatter_only else dodge_width
                 fail_dx = (idx - (n - 1) / 2) * (dw / (n - 1))
-                for freq in freqs:
+                for freq, count in freq_counts.items():
+                    fx = freq + fail_dx
                     ax.plot(
-                        freq + fail_dx, 0, "x", color=COLORS[scene],
+                        fx, 0, "x", color=COLORS[scene],
                         markersize=10, markeredgewidth=2.5, zorder=5,
                     )
+                    if count > 1:
+                        ax.annotate(str(count), (fx, 0), textcoords="offset points",
+                                    xytext=(0, 6), ha="center", va="bottom",
+                                    fontsize=14, fontweight="bold", color=COLORS[scene])
 
     ax.set_xlabel("Frequency (Hz)")
     ax.set_ylabel(ylabel)
     ax.set_title(title)
+    ax.yaxis.set_major_locator(MaxNLocator(nbins=3))
     ax.grid(axis="y", alpha=0.3)
 
     all_freqs = set(f for d in data.values() for f in d["mean_freqs"])
@@ -306,43 +354,28 @@ def plot_panel(
     if all_freqs_sorted:
         pad = (scatter_dodge_width / 2 + intra_spread / 2 + 1) if scatter_only else 3
         ax.set_xlim(all_freqs_sorted[0] - pad, all_freqs_sorted[-1] + pad)
+        # Bracket ticks + grey gap bands (unified for all modes)
         if scatter_only:
-            # No tick marks — bands provide structure
-            ax.set_xticks([])
-            ax.set_xticks(all_freqs_sorted, minor=True)
-            ax.set_xticklabels([str(int(f)) for f in all_freqs_sorted], minor=True)
-            ax.tick_params(which="minor", length=0)
+            half_spread = scatter_dodge_width / 2 + intra_spread / 2
         else:
-            # Bracket ticks: 2 marks per frequency bounding the dodge spread
-            half_spread = dodge_width * 2.25
-            edge_ticks = []
-            for f in all_freqs_sorted:
-                edge_ticks.extend([f - half_spread, f + half_spread])
-            ax.set_xticks(edge_ticks)
-            ax.set_xticklabels([""] * len(edge_ticks))
-            ax.set_xticks(all_freqs_sorted, minor=True)
-            ax.set_xticklabels([str(int(f)) for f in all_freqs_sorted], minor=True)
-            ax.tick_params(which="minor", length=0)
-            # Grey bands in gaps between bracket zones (white inside brackets)
-            x_lo = all_freqs_sorted[0] - pad
-            x_hi = all_freqs_sorted[-1] + pad
-            ax.axvspan(x_lo, all_freqs_sorted[0] - half_spread, color="#f0f0f0", zorder=0)
-            for j in range(len(all_freqs_sorted) - 1):
-                ax.axvspan(all_freqs_sorted[j] + half_spread,
-                           all_freqs_sorted[j + 1] - half_spread,
-                           color="#f0f0f0", zorder=0)
-            ax.axvspan(all_freqs_sorted[-1] + half_spread, x_hi, color="#f0f0f0", zorder=0)
-        if scatter_only:
-            # Alternating bands
-            x_lo = all_freqs_sorted[0] - pad
-            x_hi = all_freqs_sorted[-1] + pad
-            edges = [x_lo]
-            for j in range(len(all_freqs_sorted) - 1):
-                edges.append((all_freqs_sorted[j] + all_freqs_sorted[j + 1]) / 2)
-            edges.append(x_hi)
-            for j in range(len(edges) - 1):
-                if j % 2 == 0:
-                    ax.axvspan(edges[j], edges[j + 1], color="#f0f0f0", zorder=0)
+            half_spread = dodge_width / 2 + 0.75
+        edge_ticks = []
+        for f in all_freqs_sorted:
+            edge_ticks.extend([f - half_spread, f + half_spread])
+        ax.set_xticks(edge_ticks)
+        ax.set_xticklabels([""] * len(edge_ticks))
+        ax.set_xticks(all_freqs_sorted, minor=True)
+        ax.set_xticklabels([str(int(f)) for f in all_freqs_sorted], minor=True)
+        ax.tick_params(which="minor", length=0)
+        # Grey bands in gaps between bracket zones (white inside brackets)
+        x_lo = all_freqs_sorted[0] - pad
+        x_hi = all_freqs_sorted[-1] + pad
+        ax.axvspan(x_lo, all_freqs_sorted[0] - half_spread, color="#f0f0f0", zorder=0)
+        for j in range(len(all_freqs_sorted) - 1):
+            ax.axvspan(all_freqs_sorted[j] + half_spread,
+                       all_freqs_sorted[j + 1] - half_spread,
+                       color="#f0f0f0", zorder=0)
+        ax.axvspan(all_freqs_sorted[-1] + half_spread, x_hi, color="#f0f0f0", zorder=0)
 
 
 def main():

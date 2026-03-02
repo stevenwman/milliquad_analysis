@@ -111,9 +111,28 @@ Implementation: `_is_valid_trial(r, gate_end)` in `plot_validation.py`. `GATE_EN
 
 Trials with `pitch_rms > 30°` are excluded regardless of terrain. This catches robots that flip over.
 
+### Per-trial gate failure X markers (all modes)
+
+When `exclude_invalid=True`, `build_plot_data` inserts `0.0` for any gate-failed or inverted trial. In `plot_panel`, both scatter_only (rough) AND non-scatter (flat/step) modes split rendering: `val > 0` → scatter dot, `val <= 0` → X marker. This applies to all metrics (velocity, pitch, COT).
+
+Previously, non-scatter mode rendered 0.0 as regular dots — this caused misleading near-zero dots in step sim panels. Example: scene_wheel f30 step has 3 selected trials but only 2 pass the gate (max_x >= 101.5mm). The third (max_x = 79mm) now correctly renders as an X marker instead of a dot at y=0.
+
 ### "All failed" X markers
 
 When ALL selected trials for a (scene, freq) combo are invalid (didn't clear gate OR inverted), a scene-colored X is placed at y=0 on plots. This distinguishes "no data because all trials failed" from "data point not shown because it's off-screen".
+
+`build_all_failed_freqs` returns `{scene: {freq: count}}` — the count is the number of trials that failed. Used for count annotations (see below).
+
+### X marker count annotations
+
+When multiple failures collapse into a single X marker, a count number is annotated above the X (fontsize=14, bold, scene-colored). Single failures show a plain X with no number.
+
+Three sources of X markers, each with count logic:
+1. **Per-trial gate failures (scatter_only)**: failures grouped per-freq, one X + count replaces N stacked X's. Only valid trials participate in the intra-spread layout.
+2. **Per-trial gate failures (non-scatter)**: same grouping — one X + count per freq instead of overlapping X's at the same dodged x-position.
+3. **All-failed combos** (`all_failed` dict): `build_all_failed_freqs` provides the count directly. Example: step sim WR f10/f20 each have 3 selected trials that all fail the gate → X with "3".
+
+Hardcoded categorical failures (`failures` dict from `_strip_failure_freqs`) remain plain single X's — no count, because the trial data is stripped before `plot_panel` sees it.
 
 ### Flat terrain: no filtering needed in practice
 
@@ -128,13 +147,25 @@ Rough terrain has high trial-to-trial variance and low sample counts (some condi
 - **No shading** (`fill_between` suppressed)
 - **Individual trial dots** spread horizontally within each morphology's dodge slot
 - **Sorted left-to-right** by value (lowest on left, highest on right) so visual spread indicates variance
-- **Wider dodge**: `scatter_dodge_width = 15.0` Hz between morphologies (vs `dodge_width = 1.2` Hz for flat/step). Frequency ticks are 20 Hz apart.
+- **Wider dodge**: `scatter_dodge_width = 15.0` Hz between morphologies (vs `dodge_width = 3.5` Hz for flat/step). Frequency ticks are 20 Hz apart.
 - **Intra-morphology spread**: `intra_spread = 3.0` Hz — 5 trials span ±1.5 Hz within each morphology slot
 - **Clearance constraint**: morphology gap = `sdw / (n-1)` must be > `intra_spread`, otherwise adjacent morphology groups bleed into each other. Current: gap = 15/3 = 5.0 Hz, clearance = 5.0 - 3.0 = 2.0 Hz.
 - **Xlim padding**: auto-computed as `sdw/2 + intra_spread/2 + 1` for scatter_only (vs fixed ±3 Hz for flat/step)
 - **Figure width**: megacomposite uses 8 inches/column (vs default 6) to give scatter dots more physical space
 
 Activated by `terrain.startswith("rough")` in both `plot_validation.py` (standalone + 3×3 composite) and `plot_megacomposite.py` (rough row, all 5 columns).
+
+## Unified Bracket Ticks + Grey Gap Bands
+
+All rows (flat, step, rough) use the same visual language: bracket tick marks bounding each frequency zone, with grey `axvspan` bands in the gaps between zones (white inside brackets). This replaced earlier inconsistencies where rough used alternating bands and flat/step used a different pattern.
+
+Implementation (single unified block in `plot_panel`):
+- **Bracket half-spread**: scatter_only = `sdw/2 + intra_spread/2` (= 9.0 Hz), non-scatter = `dw/2 + 0.75` (= 2.5 Hz)
+- Two tick marks per frequency at ±half_spread (no labels), centered frequency labels via minor ticks with `length=0`
+- Grey bands (`#f0f0f0`) fill edges and inter-bracket gaps; bracket interiors stay white
+- Y-only grid (`ax.grid(axis="y")`) — no vertical grid lines on any row
+
+Previously went through several iterations: alternating bands → vertical separator lines → grey gap bands (matching flat/step). The current unified approach is simplest and most consistent.
 
 ## Experimental Rough n/a Trials
 
@@ -156,6 +187,8 @@ All X markers (failure modes, all-invalid combos) now receive morphology-based h
 |--------|---------|--------|
 | `plot_validation.py` | Sim-only: velocity/COT/pitch per terrain + 3×3 composite | **Primary** |
 | `plot_megacomposite.py` | 3×5 megacomposite: 3 terrains × (vel exp\|sim, pitch exp\|sim, COT) | **Primary** |
+| `plot_megacomposite_nocot.py` | 3×4 no-COT: 3 terrains × (vel exp\|sim, pitch exp\|sim) | **Primary** |
+| `plot_cot_only.py` | 3×1 COT column: 3 terrains × sim COT | **Primary** |
 | `plot_exp_vs_sim_composite.py` | Exp vs sim: 2×4 (flat+step × vel+pitch × exp+sim) | **Primary** |
 | `plot_exp_vs_sim.py` | Exp vs sim velocity only (old 2×2) | Legacy |
 | `plot_exp_vs_sim_pitch.py` | Exp vs sim pitch only (old 2×2) | Legacy |

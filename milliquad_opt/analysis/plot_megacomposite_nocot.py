@@ -24,8 +24,9 @@ import sys
 
 import matplotlib
 matplotlib.rcParams["font.family"] = "TeX Gyre Pagella"
-matplotlib.rcParams["font.size"] = 12
+matplotlib.rcParams["font.size"] = 8
 import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
 
 # Add experimental_data to path for import
 _EXP_DIR = str(pathlib.Path(__file__).resolve().parent.parent.parent / "experimental_data")
@@ -122,6 +123,10 @@ def _strip_failure_freqs(data: dict, failures: dict[str, list[float]]):
                 d["stds"].pop(idx)
 
 
+# Short row labels for paper
+_ROW_LABELS = {"flat": "Flat", "step": "Step", "rough": "Rough"}
+
+
 def main():
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -150,12 +155,56 @@ def main():
         sys.exit("No validation CSVs found")
 
     n_rows = len(present)
-    n_cols = 4  # vel_exp, vel_sim, pitch_exp, pitch_sim
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=(8 * n_cols, 5 * n_rows), squeeze=False)
+
+    # --- Paper-sized figure (IEEE IROS full-width) ---
+    fig = plt.figure(figsize=(14.0, 7.0))
+
+    # Top-level: 2 metric groups side-by-side with gap between them
+    outer = gridspec.GridSpec(
+        1, 2, figure=fig,
+        wspace=0.15,  # gap between Velocity group and Pitch group
+    )
+
+    # Each metric group: header row + n_rows × 2 data panels
+    # [header_row]   [header_row]
+    # [exp | sim]    [exp | sim]
+    # [exp | sim]    [exp | sim]
+    # [exp | sim]    [exp | sim]
+    vel_gs = gridspec.GridSpecFromSubplotSpec(
+        n_rows + 1, 2, subplot_spec=outer[0],
+        height_ratios=[0.07] + [1.0] * n_rows,
+        wspace=0.08, hspace=0.45,
+    )
+    pitch_gs = gridspec.GridSpecFromSubplotSpec(
+        n_rows + 1, 2, subplot_spec=outer[1],
+        height_ratios=[0.07] + [1.0] * n_rows,
+        wspace=0.08, hspace=0.45,
+    )
+
+    # --- Metric group headers ---
+    for gs, label in [(vel_gs, "Velocity (mm/s)"), (pitch_gs, "Pitch RMS (\u00b0)")]:
+        ax_h = fig.add_subplot(gs[0, :])
+        ax_h.text(0.5, 0.2, label, ha="center", va="center",
+                  fontsize=12, fontweight="bold", transform=ax_h.transAxes)
+        ax_h.axis("off")
+
+    # --- Create data axes (rows 1..n_rows in each group) ---
+    # axes[i] = [vel_exp, vel_sim, pitch_exp, pitch_sim]
+    axes: list[list[plt.Axes]] = []
+    for i in range(n_rows):
+        row_axes = [
+            fig.add_subplot(vel_gs[i + 1, 0]),
+            fig.add_subplot(vel_gs[i + 1, 1]),
+            fig.add_subplot(pitch_gs[i + 1, 0]),
+            fig.add_subplot(pitch_gs[i + 1, 1]),
+        ]
+        axes.append(row_axes)
+
+    # Track blank cell for legend placement
+    legend_ax = None
 
     for i, terrain in enumerate(present):
         rows, run_dir = terrain_data[terrain]
-        title = TERRAIN_TITLES.get(terrain, terrain.title())
         ge = GATE_END.get(terrain)
         exp_failures = _get_exp_failures(terrain)
         sim_failures = _get_sim_failures(terrain)
@@ -170,21 +219,21 @@ def main():
             _strip_failure_freqs(exp_vel, exp_failures)
             if so:
                 _inject_na_zeros(exp_vel)
-            plot_panel(axes[i, 0], exp_vel, f"{title}: Exp Velocity", "Forward Velocity (mm/s)", exp_failures, scatter_only=so)
+            plot_panel(axes[i][0], exp_vel, "", "Velocity (mm/s)", exp_failures, scatter_only=so)
         else:
-            axes[i, 0].set_visible(False)
+            axes[i][0].set_visible(False)
 
         # Col 1: Sim velocity
         sim_vel = build_plot_data(rows, "vx", selected_only=True, exclude_invalid=True, gate_end=ge)
         _strip_failure_freqs(sim_vel, sim_failures)
-        plot_panel(axes[i, 1], sim_vel, f"{title}: Sim Velocity", "Forward Velocity (mm/s)", sim_failures, all_failed, scatter_only=so)
+        plot_panel(axes[i][1], sim_vel, "", "", sim_failures, all_failed, scatter_only=so)
 
         # Share y-axis for velocity pair if both exist
         if vel_ext is not None:
-            y_lo = min(axes[i, 0].get_ylim()[0], axes[i, 1].get_ylim()[0])
-            y_hi = max(axes[i, 0].get_ylim()[1], axes[i, 1].get_ylim()[1])
-            axes[i, 0].set_ylim(y_lo, y_hi)
-            axes[i, 1].set_ylim(y_lo, y_hi)
+            y_lo = min(axes[i][0].get_ylim()[0], axes[i][1].get_ylim()[0])
+            y_hi = max(axes[i][0].get_ylim()[1], axes[i][1].get_ylim()[1])
+            axes[i][0].set_ylim(y_lo, y_hi)
+            axes[i][1].set_ylim(y_lo, y_hi)
 
         # Col 2: Exp pitch
         pitch_ext = _PITCH_EXTRACTORS.get(terrain)
@@ -193,40 +242,118 @@ def main():
             _strip_failure_freqs(exp_pitch, exp_failures)
             if pitch_exclude:
                 strip_freqs(exp_pitch, pitch_exclude)
-            plot_panel(axes[i, 2], exp_pitch, f"{title}: Exp Pitch", "Pitch Amplitude RMS (\u00b0)", exp_failures, scatter_only=so)
+            plot_panel(axes[i][2], exp_pitch, "", "Pitch RMS (\u00b0)", exp_failures, scatter_only=so)
         else:
-            axes[i, 2].set_visible(False)
+            # Blank cell — use for legend
+            axes[i][2].axis("off")
+            legend_ax = axes[i][2]
 
         # Col 3: Sim pitch
         sim_pitch = build_plot_data(rows, "pitch_rms", selected_only=True, exclude_invalid=True, gate_end=ge)
         _strip_failure_freqs(sim_pitch, sim_failures)
         if pitch_exclude:
             strip_freqs(sim_pitch, pitch_exclude)
-        plot_panel(axes[i, 3], sim_pitch, f"{title}: Sim Pitch", "Pitch Amplitude RMS (\u00b0)", sim_failures, all_failed=all_failed, scatter_only=so)
+        plot_panel(axes[i][3], sim_pitch, "", "", sim_failures, all_failed=all_failed, scatter_only=so)
 
         # Share y-axis for pitch pair if both exist
         if pitch_ext is not None:
-            y_lo = min(axes[i, 2].get_ylim()[0], axes[i, 3].get_ylim()[0])
-            y_hi = max(axes[i, 2].get_ylim()[1], axes[i, 3].get_ylim()[1])
-            axes[i, 2].set_ylim(y_lo, y_hi)
-            axes[i, 3].set_ylim(y_lo, y_hi)
+            y_lo = min(axes[i][2].get_ylim()[0], axes[i][3].get_ylim()[0])
+            y_hi = max(axes[i][2].get_ylim()[1], axes[i][3].get_ylim()[1])
+            axes[i][2].set_ylim(y_lo, y_hi)
+            axes[i][3].set_ylim(y_lo, y_hi)
 
-    # Single legend from first visible axes
-    for ax in axes.flat:
-        if ax.get_visible():
-            handles, labels = ax.get_legend_handles_labels()
-            if handles:
-                ax.legend(handles, labels, loc="upper left", fontsize=10, framealpha=0.9)
-                break
-    # Remove duplicate legends
-    for ax in axes.flat:
-        leg = ax.get_legend()
-        if leg and ax is not axes.flat[0]:
-            leg.remove()
+    # --- Post-hoc axis cleanup ---
+    letter_idx = 0
+    for i in range(n_rows):
+        terrain = present[i]
+        row_label = _ROW_LABELS.get(terrain, terrain.title())
+        for j in range(4):
+            ax = axes[i][j]
+            if not ax.get_visible() or ax is legend_ax:
+                continue
 
-    fig.tight_layout()
+            # Shrink scatter dots only (not fill_between shading)
+            from matplotlib.collections import PathCollection
+            for coll in ax.collections:
+                if isinstance(coll, PathCollection):
+                    coll.set_sizes([12])
+            for line in ax.lines:
+                if line.get_marker() == 'x':
+                    line.set_markersize(6)
+                    line.set_markeredgewidth(1.5)
+
+            # Subplot lettering: (a), (b), (c), ...
+            letter = chr(ord('a') + letter_idx)
+            ax.text(0.02, 0.95, f"({letter})", transform=ax.transAxes,
+                    fontsize=10, fontweight="bold", va="top", ha="left")
+            letter_idx += 1
+
+            # Sub-headers on top row only
+            if i == 0:
+                sub = "Experiment" if j % 2 == 0 else "Simulation"
+                ax.set_title(sub, fontsize=11)
+
+            # Remove xlabel except bottom row
+            if i < n_rows - 1:
+                ax.set_xlabel("")
+                ax.tick_params(axis="x", labelbottom=False)
+            else:
+                ax.set_xlabel("")  # cleared; we'll add group-level xlabel via fig.text
+
+            # Hide all left ytick marks and labels; right panels show ticks on right
+            ax.set_ylabel("")
+            ax.tick_params(axis="y", left=False, labelleft=False, right=False)
+            if j in (1, 3):
+                ax.tick_params(axis="y", right=True, labelright=True)
+                ax.yaxis.set_label_position("right")
+
+        # Terrain label on the left (ylabel of velocity-exp panel)
+        axes[i][0].set_ylabel(row_label, fontsize=12, fontweight="bold")
+
+    # (units now in group headers — no separate right-side labels needed)
+
+
+    # --- Legend in blank cell (or bottom of figure as fallback) ---
+    handles, labels = None, None
+    for i in range(n_rows):
+        for j in range(4):
+            if axes[i][j].get_visible():
+                h, l = axes[i][j].get_legend_handles_labels()
+                if h:
+                    handles, labels = h, l
+                    break
+        if handles:
+            break
+
+    # Remove any per-panel legends
+    for i in range(n_rows):
+        for j in range(4):
+            leg = axes[i][j].get_legend()
+            if leg:
+                leg.remove()
+
+    if handles and legend_ax is not None:
+        legend_ax.legend(
+            handles, labels, loc="upper center", fontsize=9,
+            frameon=True, framealpha=0.9, edgecolor="0.8",
+            title="Morphology", title_fontsize=10,
+        )
+        legend_ax.text(
+            0.5, 0.08, "x-axis: Drive frequency (Hz)",
+            transform=legend_ax.transAxes,
+            ha="center", va="center", fontsize=11,
+        )
+        legend_ax.plot(0.38, -0.08, "x", color="red", markersize=7,
+                       markeredgewidth=1.5, transform=legend_ax.transAxes,
+                       clip_on=False)
+        legend_ax.text(0.42, -0.08, "= failure", transform=legend_ax.transAxes,
+                       ha="left", va="center", fontsize=11)
+    elif handles:
+        fig.legend(handles, labels, loc="lower center", ncol=4,
+                   fontsize=7, framealpha=0.9)
+
     out = args.output or "plots/megacomposite_nocot.png"
-    fig.savefig(out, dpi=150, bbox_inches="tight")
+    fig.savefig(out, dpi=200, bbox_inches="tight")
     print(f"Saved: {out}")
 
     if not args.no_show:
