@@ -24,7 +24,6 @@ import importlib
 import os
 import pathlib
 import sys
-from datetime import datetime
 
 import mujoco
 import numpy as np
@@ -60,46 +59,6 @@ def _get_robot_mass(mjcf_path: str) -> float:
     """Load model just to read total mass."""
     model = mujoco.MjModel.from_xml_path(mjcf_path)
     return float(np.sum(model.body_mass))
-
-
-def _store_trajectory_arrays(
-    traj: list[dict], traj_key: str, traj_arrays: dict[str, np.ndarray],
-) -> None:
-    """Extract all raw timeseries from trajectory and store in traj_arrays dict.
-
-    Stores under keys: {traj_key}_{field} for each field.
-    """
-    # Kinematics (always present)
-    traj_arrays[f"{traj_key}_time"] = np.array([s["time"] for s in traj])
-    traj_arrays[f"{traj_key}_pos_x"] = np.array([s["pos"][0] for s in traj])
-    traj_arrays[f"{traj_key}_pos_y"] = np.array([s["pos"][1] for s in traj])
-    traj_arrays[f"{traj_key}_pos_z"] = np.array([s["pos"][2] for s in traj])
-    traj_arrays[f"{traj_key}_vel_x"] = np.array([s["vel"][0] for s in traj])
-    traj_arrays[f"{traj_key}_vel_y"] = np.array([s["vel"][1] for s in traj])
-    traj_arrays[f"{traj_key}_vel_z"] = np.array([s["vel"][2] for s in traj])
-    traj_arrays[f"{traj_key}_pitch"] = compute_pitch_series(traj)
-    traj_arrays[f"{traj_key}_joint_pos"] = np.array([s["joint_pos"] for s in traj])  # (T, 4)
-
-    # Drive angle (from step_cache — present when magnetic forces applied)
-    if "drive_angle" in traj[0]:
-        traj_arrays[f"{traj_key}_drive_angle"] = np.array([s["drive_angle"] for s in traj])
-
-    # External torques (for power/COT recomputation)
-    if "tau_ext" in traj[0]:
-        traj_arrays[f"{traj_key}_tau_ext"] = np.array([s["tau_ext"] for s in traj])  # (T, 4, 3)
-
-    # Contact data (from _extract_contact_data)
-    if "leg_in_contact" in traj[0]:
-        traj_arrays[f"{traj_key}_leg_in_contact"] = np.array(
-            [s["leg_in_contact"] for s in traj])  # (T, 4)
-        traj_arrays[f"{traj_key}_leg_normal_force"] = np.array(
-            [s["leg_normal_force"] for s in traj])  # (T, 4)
-        traj_arrays[f"{traj_key}_leg_tangent_force"] = np.array(
-            [s["leg_tangent_force"] for s in traj])  # (T, 4)
-        traj_arrays[f"{traj_key}_leg_contact_pos"] = np.array(
-            [s["leg_contact_pos"] for s in traj])  # (T, 4, 3)
-        traj_arrays[f"{traj_key}_total_ncon"] = np.array(
-            [s["total_ncon"] for s in traj])  # (T,)
 
 
 def _load_exploratory_rough_conditions(
@@ -288,8 +247,11 @@ def main():
 
             vx = extract_velocity(traj, SETTLE_TIME, step_start_x, step_end_x)
             traj_key = f"{rid}_t{t}"
-            _store_trajectory_arrays(traj, traj_key, traj_arrays)
-            max_x = float(traj_arrays[f"{traj_key}_pos_x"].max())
+            pos_x_arr = np.array([s["pos"][0] for s in traj])
+            traj_arrays[f"{traj_key}_time"] = np.array([s["time"] for s in traj])
+            traj_arrays[f"{traj_key}_pos_x"] = pos_x_arr
+            traj_arrays[f"{traj_key}_pitch"] = compute_pitch_series(traj)
+            max_x = float(pos_x_arr.max())
             err = None if is_failure else abs(vx - target) / target * 100
             cot = compute_cot(traj, mass, SETTLE_TIME,
                               step_start_x=step_start_x, step_end_x=step_end_x)
@@ -446,8 +408,11 @@ def main():
 
                 vx = extract_velocity(traj, SETTLE_TIME, step_start_x, step_end_x)
                 traj_key = f"{rid}_t{t}"
-                _store_trajectory_arrays(traj, traj_key, traj_arrays)
-                max_x = float(traj_arrays[f"{traj_key}_pos_x"].max())
+                pos_x_arr = np.array([s["pos"][0] for s in traj])
+                traj_arrays[f"{traj_key}_time"] = np.array([s["time"] for s in traj])
+                traj_arrays[f"{traj_key}_pos_x"] = pos_x_arr
+                traj_arrays[f"{traj_key}_pitch"] = compute_pitch_series(traj)
+                max_x = float(pos_x_arr.max())
                 cot = compute_cot(traj, mass, SETTLE_TIME,
                                   step_start_x=step_start_x, step_end_x=step_end_x)
                 mwv = min_window_velocity(traj, freq, SETTLE_TIME,
@@ -569,17 +534,14 @@ def main():
         print(f"  Videos: {video_dir}/")
 
     # --- Trajectory data ---
-    ts = datetime.now().strftime("%Y%m%dT%H%M%S")
     if args.csv and traj_arrays:
-        npz_path = args.run_dir / f"{ts}_validation_trajectories.npz"
+        npz_path = args.run_dir / "validation_trajectories.npz"
         np.savez_compressed(npz_path, **traj_arrays)
-        # Count unique trial prefixes
-        trial_prefixes = set(k.rsplit("_", 1)[0] for k in traj_arrays if "_time" in k)
-        print(f"\n  Trajectories: {npz_path} ({len(trial_prefixes)} trials, {len(traj_arrays)} arrays)")
+        print(f"\n  Trajectories: {npz_path} ({len(traj_arrays)//3} trials)")
 
     # --- CSV output ---
     if args.csv and all_trial_rows:
-        csv_path = args.run_dir / f"{ts}_validation_trials.csv"
+        csv_path = args.run_dir / "validation_trials.csv"
         fieldnames = [
             "ref_id", "scene", "ctrl_freq", "target_speed", "trial",
             "rng_seed", "jitter_type", "jitter_value", "vx",

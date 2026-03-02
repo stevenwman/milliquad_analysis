@@ -127,8 +127,8 @@ def main():
     import simulation as sim
 
     _orig_record = sim._record_state
-    def _patched_record(trajectory, data, step_cache=None):
-        _orig_record(trajectory, data, step_cache)
+    def _patched_record(trajectory, model, data, step_cache=None):
+        _orig_record(trajectory, model, data, step_cache)
         trajectory[-1]["energy"] = data.energy.copy()
     sim._record_state = _patched_record
 

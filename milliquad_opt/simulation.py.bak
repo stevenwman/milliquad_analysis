@@ -278,62 +278,7 @@ def _check_instability(model, data) -> None:
         raise ValueError(f"Simulation unstable: MuJoCo warnings triggered: {active}")
 
 
-def _extract_contact_data(model, data) -> dict:
-    """Extract per-leg contact summary from MuJoCo contact state.
-
-    Returns dict with:
-        leg_in_contact:    (4,) bool
-        leg_normal_force:  (4,) float  — total normal force per leg (N)
-        leg_tangent_force: (4,) float  — total tangential force magnitude per leg (N)
-        leg_contact_pos:   (4,3) float — centroid of contact positions per leg (m)
-        total_ncon:        int         — total active contacts
-    """
-    leg_in_contact = np.zeros(4, dtype=bool)
-    leg_normal_force = np.zeros(4)
-    leg_tangent_force = np.zeros(4)
-    leg_contact_pos_sum = np.zeros((4, 3))
-    leg_contact_count = np.zeros(4, dtype=int)
-
-    force_buf = np.zeros(6)  # reusable buffer for mj_contactForce
-
-    for i in range(data.ncon):
-        contact = data.contact[i]
-        body1 = model.geom_bodyid[contact.geom1]
-        body2 = model.geom_bodyid[contact.geom2]
-
-        # Identify leg-terrain contact: one body is a leg (2-5), other is world (0)
-        leg_idx = -1
-        if LEG_BODY_OFFSET <= body1 < LEG_BODY_OFFSET + 4 and body2 == 0:
-            leg_idx = body1 - LEG_BODY_OFFSET
-        elif LEG_BODY_OFFSET <= body2 < LEG_BODY_OFFSET + 4 and body1 == 0:
-            leg_idx = body2 - LEG_BODY_OFFSET
-        if leg_idx < 0:
-            continue
-
-        mujoco.mj_contactForce(model, data, i, force_buf)
-        # force_buf: [normal, t1, t2, torsional, r1, r2] in contact frame
-        leg_in_contact[leg_idx] = True
-        leg_normal_force[leg_idx] += force_buf[0]
-        leg_tangent_force[leg_idx] += np.sqrt(force_buf[1] ** 2 + force_buf[2] ** 2)
-        leg_contact_pos_sum[leg_idx] += contact.pos
-        leg_contact_count[leg_idx] += 1
-
-    # Compute centroid for legs with contacts
-    mask = leg_contact_count > 0
-    leg_contact_pos = np.zeros((4, 3))
-    if mask.any():
-        leg_contact_pos[mask] = leg_contact_pos_sum[mask] / leg_contact_count[mask, None]
-
-    return {
-        "leg_in_contact": leg_in_contact,
-        "leg_normal_force": leg_normal_force,
-        "leg_tangent_force": leg_tangent_force,
-        "leg_contact_pos": leg_contact_pos,
-        "total_ncon": int(data.ncon),
-    }
-
-
-def _record_state(trajectory: list[dict], model, data, step_cache: dict | None = None) -> None:
+def _record_state(trajectory: list[dict], data, step_cache: dict | None = None) -> None:
     """Record current state to trajectory list."""
     entry = {
         "time": data.time,
@@ -345,9 +290,6 @@ def _record_state(trajectory: list[dict], model, data, step_cache: dict | None =
         "leg_xquat": data.xquat[_LEG_BODY_SLICE].copy(),
         "leg_xpos": data.xpos[_LEG_BODY_SLICE].copy(),
     }
-    # Contact data
-    entry.update(_extract_contact_data(model, data))
-
     if step_cache is not None:
         if "tau_ext" in step_cache:
             entry["tau_ext"] = step_cache["tau_ext"].copy()
@@ -428,7 +370,7 @@ def _do_simulation_step(
         step_times["mj_step"].append(time.perf_counter() - t0)
         t0 = time.perf_counter()
     _check_instability(model, data)
-    _record_state(trajectory, model, data, step_cache)
+    _record_state(trajectory, data, step_cache)
     if benchmark and step_times is not None:
         step_times["record_state"].append(time.perf_counter() - t0)
     if not ignore_stuck_detection:
