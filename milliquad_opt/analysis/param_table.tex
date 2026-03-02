@@ -1,0 +1,42 @@
+% Optimized contact parameters: flat (rk4_flat warm), step (rk4_step_cold), rough (rk4_rough warm)
+% Source: RK4_OPTIMIZATION_RESULTS.md
+% Requires: \usepackage{siunitx, xcolor, booktabs}
+% Usage: \input{param_table.tex}
+% Parameter names match MuJoCo API (https://mujoco.readthedocs.io/en/stable/XMLreference.html)
+%   friction: geom/pair attribute, 3-vector (sliding, torsional, rolling)
+%   solref: geom/pair attribute, 2-vector (timeconst, dampratio)
+%   solimp: geom/pair attribute, 5-vector (dmin, dmax, width, midpoint, power)
+%   damping: joint attribute
+%   noslip_iterations, noslip_tolerance, o_margin: option attributes
+%   moment_fudge, field_fudge: custom (not MuJoCo)
+
+\begin{table}[ht]
+\centering
+\caption{Optimized contact parameters for each terrain. \textcolor{red}{Red} highlights outlier values.}
+\label{tab:params}
+\footnotesize
+\sisetup{output-exponent-marker=\text{e}}
+\begin{tabular}{lccc}
+\toprule
+Parameter & Flat & Step & Rough \\
+\midrule
+\texttt{friction} (sliding)          & \num{0.368}     & \num{0.358}     & \textcolor{red}{\num{0.504}}     \\
+\texttt{friction} (torsional)        & \num{1.40e-4}   & \textcolor{red}{\num{1.70e-3}}   & \num{1.10e-4}   \\
+\texttt{friction} (rolling)          & \num{4.30e-6}   & \textcolor{red}{\num{2.70e-5}}   & \num{1.90e-6}   \\
+\texttt{solref} (timeconst)          & \textcolor{red}{\num{1.36e-3}}   & \textcolor{red}{\num{7.28e-3}}   & \textcolor{red}{\num{4.30e-4}}   \\
+\texttt{solref} (dampratio)          & \textcolor{red}{\num{6.08}}       & \num{2.38}       & \num{3.03}       \\
+\texttt{solimp} (dmin)               & \textcolor{red}{\num{0.231}}      & \textcolor{red}{\num{0.432}}      & \textcolor{red}{\num{0.321}}      \\
+\texttt{solimp} (dmax)               & \textcolor{red}{\num{0.944}}      & \textcolor{red}{\num{0.836}}      & \textcolor{red}{\num{0.521}}      \\
+\texttt{solimp} (width)              & \num{2.90e-5}   & \textcolor{red}{\num{2.00e-4}}   & \num{3.60e-5}   \\
+\texttt{solimp} (midpoint)           & \textcolor{red}{\num{0.534}}      & \textcolor{red}{\num{0.366}}      & \textcolor{red}{\num{0.787}}      \\
+\texttt{solimp} (power)              & \num{5.08}       & \num{4.14}       & \num{5.50}       \\
+\texttt{moment\_fudge}$^*$           & \num{0.881}      & \num{0.797}      & \textcolor{red}{\num{1.14}}       \\
+\texttt{field\_fudge}$^*$            & \num{1.04}       & \textcolor{red}{\num{0.802}}      & \num{1.03}       \\
+\texttt{damping}                     & \num{3.40e-10}   & \num{9.30e-10}   & \num{7.30e-10}   \\
+\texttt{noslip\_iterations}          & 0          & \textcolor{red}{30}         & 0          \\
+\texttt{noslip\_tolerance}           & \num{1.00e-6}   & \textcolor{red}{\num{1.50e-5}}   & \num{1.60e-6}  \\
+\texttt{o\_margin}                   & \num{1.70e-4}   & \num{2.70e-4}   & \textcolor{red}{\num{2.90e-6}}   \\
+\bottomrule
+\multicolumn{4}{l}{\scriptsize $^*$Custom scaling factors, not MuJoCo parameters.}
+\end{tabular}
+\end{table}

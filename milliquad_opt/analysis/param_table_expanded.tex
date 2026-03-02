@@ -1,0 +1,36 @@
+% Expanded version of param_table.tex with description column
+% Optimized contact parameters: flat (rk4_flat warm), step (rk4_step_cold), rough (rk4_rough warm)
+% Source: RK4_OPTIMIZATION_RESULTS.md
+% Requires: \usepackage{siunitx, xcolor, booktabs}
+% Usage: \input{param_table_expanded.tex}
+
+\begin{table*}[ht]
+\centering
+\caption{Optimized contact parameters for each terrain. \textcolor{red}{Red} highlights divergent values.}
+\label{tab:params_expanded}
+\footnotesize
+\sisetup{}
+\begin{tabular}{lcccp{7cm}}
+\toprule
+Parameter & Flat & Step & Rough & Higher means: \\
+\midrule
+\texttt{friction} (sliding)          & \num{0.368}     & \num{0.358}     & \textcolor{red}{\num{0.504}}     & more resistance to lateral sliding \\
+\texttt{friction} (torsional)        & \num{1.40e-4}   & \textcolor{red}{\num{1.70e-3}}   & \num{1.10e-4}   & more resistance to spinning about contact normal \\
+\texttt{friction} (rolling)          & \num{4.30e-6}   & \textcolor{red}{\num{2.70e-5}}   & \num{1.90e-6}   & more resistance to rolling at contact \\
+\texttt{solref} (timeconst)          & \textcolor{red}{\num{1.36e-3}}   & \textcolor{red}{\num{7.28e-3}}   & \textcolor{red}{\num{4.30e-4}}   & softer, slower constraint stabilization \\
+\texttt{solref} (dampratio)          & \textcolor{red}{\num{6.08}}       & \num{2.38}       & \num{3.03}       & more damped contact response; $<$1 is underdamped \\
+\texttt{solimp} (dmin)               & \textcolor{red}{\num{0.231}}      & \textcolor{red}{\num{0.432}}      & \textcolor{red}{\num{0.321}}      & contact feels stiffer on initial touch \\
+\texttt{solimp} (dmax)               & \textcolor{red}{\num{0.944}}      & \textcolor{red}{\num{0.836}}      & \textcolor{red}{\num{0.521}}      & contact stays stiffer under deep penetration \\
+\texttt{solimp} (width)              & \num{2.90e-5}   & \textcolor{red}{\num{2.00e-4}}   & \num{3.60e-5}   & stiffness ramps up more gradually with penetration depth \\
+\texttt{solimp} (midpoint)           & \textcolor{red}{\num{0.534}}      & \textcolor{red}{\num{0.366}}      & \textcolor{red}{\num{0.787}}      & contact reaches full stiffness at shallower penetration \\
+\texttt{solimp} (power)              & \num{5.08}       & \num{4.14}       & \num{5.50}       & stiffness transitions more abruptly between dmin and dmax \\
+\texttt{moment\_fudge}$^*$           & \num{0.881}      & \num{0.797}      & \textcolor{red}{\num{1.14}}       & magnets react more strongly to the magnetic field \\
+\texttt{field\_fudge}$^*$            & \num{1.04}       & \textcolor{red}{\num{0.802}}      & \num{1.03}       & stronger external drive field \\
+\texttt{damping}                     & \num{3.40e-10}   & \num{9.30e-10}   & \num{7.30e-10}   & more viscous resistance at each joint \\
+\texttt{noslip\_iterations}          & 0          & \textcolor{red}{30}         & 0          & more accurate no-slip friction enforcement; 0 disables solver \\
+\texttt{noslip\_tolerance}           & \num{1.00e-6}   & \textcolor{red}{\num{1.50e-5}}   & \num{1.60e-6}  & more residual sliding allowed before friction solver converges \\
+\texttt{o\_margin}                   & \num{1.70e-4}   & \num{2.70e-4}   & \textcolor{red}{\num{2.90e-6}}   & contacts detected earlier (larger gap) \\
+\bottomrule
+\multicolumn{5}{l}{\scriptsize $^*$Custom scaling factors, not MuJoCo parameters.}
+\end{tabular}
+\end{table*}

@@ -340,7 +340,7 @@ def plot_panel(
     ax.set_xlabel("Frequency (Hz)")
     ax.set_ylabel(ylabel)
     ax.set_title(title)
-    ax.yaxis.set_major_locator(MaxNLocator(nbins=3))
+    ax.yaxis.set_major_locator(MaxNLocator(nbins=3, min_n_ticks=3))
     ax.grid(axis="y", alpha=0.3)
 
     all_freqs = set(f for d in data.values() for f in d["mean_freqs"])

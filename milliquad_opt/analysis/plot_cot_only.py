@@ -109,6 +109,10 @@ def main():
         terrain = present[i]
         row_label = _ROW_LABELS.get(terrain, terrain.title())
 
+        # Uniform padding below 0 (5% of top) so 0-tick + X markers are visible
+        top = ax.get_ylim()[1]
+        ax.set_ylim(bottom=-0.05 * top)
+
         # Shrink dots and X markers
         for coll in ax.collections:
             if isinstance(coll, PathCollection):
@@ -125,7 +129,8 @@ def main():
 
         # Terrain label on left, y-ticks on left
         ax.set_ylabel(row_label, fontsize=10, fontweight="bold")
-        ax.tick_params(axis="y", left=True, labelleft=True, right=False, labelright=False)
+        ax.tick_params(axis="y", left=True, labelleft=True, right=False, labelright=False, labelsize=10)
+        ax.tick_params(axis="x", which="both", labelsize=10)
 
         # Remove xlabel except bottom row
         if i < n_rows - 1:
@@ -158,7 +163,7 @@ def main():
         plot_center = (plot_left + plot_right) / 2
         fig.legend(handles, labels, loc="lower center", ncol=4,
                    fontsize=7, framealpha=0.9,
-                   bbox_to_anchor=(plot_center, 0.02))
+                   bbox_to_anchor=(plot_center, 0.04))
 
     out = args.output or "plots/cot_only.png"
     fig.savefig(out, dpi=200, bbox_inches="tight")
