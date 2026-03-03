@@ -82,6 +82,17 @@ def _get_exp_failures(terrain: str) -> dict[str, list[float]]:
     return merged
 
 
+# Experimental failure counts (3 trials per condition, all failed)
+_EXP_FAILURE_COUNTS: dict[str, dict[str, dict[float, int]]] = {
+    "flat": {"scene_wheel": {50.0: 3}},
+    "step": {"scene_wheel": {10.0: 3, 20.0: 3}},
+}
+
+
+def _get_exp_all_failed(terrain: str) -> dict[str, dict[float, int]]:
+    return _EXP_FAILURE_COUNTS.get(terrain, {})
+
+
 def _get_sim_failures(terrain: str) -> dict[str, list[float]]:
     return _SHARED_FAILURES.get(terrain, {})
 
@@ -207,6 +218,7 @@ def main():
         rows, run_dir = terrain_data[terrain]
         ge = GATE_END.get(terrain)
         exp_failures = _get_exp_failures(terrain)
+        exp_all_failed = _get_exp_all_failed(terrain)
         sim_failures = _get_sim_failures(terrain)
         pitch_exclude = PITCH_EXCLUDE.get(terrain, [])
         all_failed = build_all_failed_freqs(rows, selected_only=True, gate_end=ge)
@@ -219,7 +231,7 @@ def main():
             _strip_failure_freqs(exp_vel, exp_failures)
             if so:
                 _inject_na_zeros(exp_vel)
-            plot_panel(axes[i][0], exp_vel, "", "Velocity (mm/s)", exp_failures, scatter_only=so)
+            plot_panel(axes[i][0], exp_vel, "", "Velocity (mm/s)", exp_failures, exp_all_failed, scatter_only=so)
         else:
             axes[i][0].set_visible(False)
 
@@ -232,6 +244,7 @@ def main():
         if vel_ext is not None:
             y_lo = min(axes[i][0].get_ylim()[0], axes[i][1].get_ylim()[0])
             y_hi = max(axes[i][0].get_ylim()[1], axes[i][1].get_ylim()[1])
+            y_lo = min(y_lo, -0.05 * (y_hi - y_lo))  # ≥5% bottom padding
             axes[i][0].set_ylim(y_lo, y_hi)
             axes[i][1].set_ylim(y_lo, y_hi)
 
@@ -242,7 +255,7 @@ def main():
             _strip_failure_freqs(exp_pitch, exp_failures)
             if pitch_exclude:
                 strip_freqs(exp_pitch, pitch_exclude)
-            plot_panel(axes[i][2], exp_pitch, "", "Pitch RMS (\u00b0)", exp_failures, scatter_only=so)
+            plot_panel(axes[i][2], exp_pitch, "", "Pitch RMS (\u00b0)", exp_failures, exp_all_failed, scatter_only=so)
         else:
             # Blank cell — use for legend
             axes[i][2].axis("off")
@@ -259,6 +272,7 @@ def main():
         if pitch_ext is not None:
             y_lo = min(axes[i][2].get_ylim()[0], axes[i][3].get_ylim()[0])
             y_hi = max(axes[i][2].get_ylim()[1], axes[i][3].get_ylim()[1])
+            y_lo = min(y_lo, -0.05 * (y_hi - y_lo))
             axes[i][2].set_ylim(y_lo, y_hi)
             axes[i][3].set_ylim(y_lo, y_hi)
 

@@ -94,6 +94,15 @@ def _store_trajectory_arrays(
         traj_arrays[f"{traj_key}_tau_ext"] = np.array(
             [s["tau_ext"] for s in traj], dtype=f32)  # (T, 4, 3)
 
+    # Energy fields (for COT recomputation with corrected axis-projection formula)
+    if "leg_xquat" in traj[0]:
+        traj_arrays[f"{traj_key}_leg_xquat"] = np.array(
+            [s["leg_xquat"] for s in traj], dtype=f32)  # (T, 4, 4)
+        traj_arrays[f"{traj_key}_joint_vel"] = np.array(
+            [s["joint_vel"] for s in traj], dtype=f32)  # (T, 4)
+        traj_arrays[f"{traj_key}_leg_xpos"] = np.array(
+            [s["leg_xpos"] for s in traj], dtype=f32)  # (T, 4, 3)
+
     # Contact data (from _extract_contact_data)
     if "leg_in_contact" in traj[0]:
         traj_arrays[f"{traj_key}_leg_in_contact"] = np.array(

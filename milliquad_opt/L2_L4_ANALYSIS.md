@@ -496,6 +496,10 @@ analysis/l2_l4/
 - Body bin is hatched, separated by dashed line from leg bins.
 - Old iterations archived in `figures/archive/`.
 
+![H1 contact histogram — passing trials](analysis/l2_l4/H1/figures/20260302T145458_contact_histogram_flat_step_rough.png)
+
+![H1 contact histogram — failed trials](analysis/l2_l4/H1/figures/20260302T150113_contact_histogram_step_rough_failed.png)
+
 **Key findings from H1**:
 - All morphologies peak at 0 leg contacts across all terrains — legs are airborne most of the time.
 - L1 has ~60–70% zero-contact fraction. L4 and WR distribute more evenly across 1–3 contacts.
@@ -528,6 +532,164 @@ uv run python -m analysis.l2_l4.H1.plot_contact_histogram \
 uv run python -m analysis.l2_l4.H1.plot_contact_raster \
     results/20260228T202903_rough_spatial_rk4 --freq 30
 ```
+
+### H3 plots — DONE (2026-03-02)
+
+Scripts in `analysis/l2_l4/H3/`. Two paper figures addressing velocity ripple (H3): phase-folded profiles show the ripple *shape*, ripple summary bar chart quantifies it.
+
+Discarded plots (still in repo but not used):
+- `plot_fft_spectrum.py` — redundant with phase-folded (same information, harder to read)
+- `plot_angle_lag.py` — negative result (all legs cluster at same lag regardless of morphology), poorly communicated by polar format
+
+```
+analysis/l2_l4/H3/
+  __init__.py
+  PLAN.md                  # detailed spec
+  plot_phase_folded.py     # phase-folded vel_x + power (normalized)
+  plot_ripple_summary.py   # ripple coefficient bar chart (1x3, all terrains)
+  figures/
+```
+
+**Phase-folded velocity + power** (`plot_phase_folded.py`)
+- 2-row figure: top = `vel_x / mean`, bottom = `power / mean`, both binned by `drive_angle mod 2pi` into 36 bins (10°).
+- Columns = frequencies. Single terrain per invocation. Uses `--power --normalize` flags.
+- Morphologies overlaid as colored lines with ±1 std shaded bands (averaged across valid trials).
+- Key visual: L1 swings ±70% at 10Hz flat, L4 ±20%, WR ±5%. Shape is terrain-invariant but amplitude grows on step/rough.
+
+**Ripple coefficient summary** (`plot_ripple_summary.py`)
+- 1×3 figure: one panel per terrain (flat, step, rough), shared y-axis.
+- x = frequency (per-terrain, no blank slots), grouped bars colored by morphology (MORPH_COLORS).
+- Ripple = mean(std_per_revolution) / |mean(vx)|. Error bars from trial-level std.
+- Key visual: monotonic L1>L2>L4>WR on flat; WR collapses on step (worse than L4).
+
+**Usage** (from `milliquad_opt/`):
+```bash
+# Phase-folded (normalized power) — one terrain at a time
+uv run python -m analysis.l2_l4.H3.plot_phase_folded \
+    results/20260228T013353_rk4_flat --power --normalize
+
+# Ripple summary — all terrains
+uv run python -m analysis.l2_l4.H3.plot_ripple_summary \
+    results/20260228T013353_rk4_flat \
+    results/20260228T230022_step_q60_rk-warm \
+    results/20260228T202903_rough_spatial_rk4
+```
+
+#### Phase-folded velocity + power (normalized)
+
+![Phase-folded flat (power, normalized)](analysis/l2_l4/H3/figures/20260302T182647_phase_folded_flat_power_norm.png)
+
+![Phase-folded step (power, normalized)](analysis/l2_l4/H3/figures/20260302T182950_phase_folded_step_power_norm.png)
+
+![Phase-folded rough (power, normalized)](analysis/l2_l4/H3/figures/20260302T182951_phase_folded_rough_power_norm.png)
+
+#### Ripple coefficient summary
+
+![Ripple summary all terrains](analysis/l2_l4/H3/figures/20260302T190551_ripple_summary_flat_step_rough.png)
+
+**Key findings from H3 (velocity ripple):**
+
+Cross-terrain ripple coefficient (morphology average across freqs):
+
+| | Flat | Step | Rough |
+|---|---|---|---|
+| L1 | 0.39 | 1.13 | 0.74 |
+| L2 | 0.19 | 0.77 | 0.40 |
+| L4 | 0.10 | 0.26 | 0.27 |
+| WR | 0.05 | 0.43 | 0.18 |
+
+- Monotonic ripple reduction with spoke count on flat: L1 (0.39) → L2 (0.19) → L4 (0.10) → WR (0.05). Each doubling of spokes roughly halves ripple.
+- Terrain degrades all morphologies, but L4 degrades least. Flat→step multiplier: L1 ×2.9, L2 ×4.1, L4 ×2.5, WR ×9.2. L4 is the most terrain-robust on ripple.
+- WR goes from smoothest on flat to *worse than L4* on steps — continuous contact advantage collapses on obstacles.
+- Phase-folded velocity at 10Hz flat: L1 shows ~100 mm/s peak-to-trough swing within one revolution. L4 is nearly flat. By 50Hz all morphologies smooth out (inertia filters oscillation), but ordering persists.
+- Power row shows thrust concentration: L1 dumps all power in one angular window, L4 distributes across 4 windows. WR power at 50Hz fluctuates wildly per revolution but velocity stays stable (inertial filtering — body mass acts as low-pass filter).
+
+**Caveats:**
+- All plots show only passing trials (gate + inversion filter). WR on step/rough has severe survivorship bias (3–5/15 step, 7/30 rough pass the gate). WR metrics look "okay" on terrain partly because only the best trials survived.
+- Rough terrain L4 50Hz: large std bands in normalized phase fold are physical — terrain asperities randomize the per-revolution velocity shape even when mean speed is stable.
+
+### H2 plots — DONE (2026-03-02)
+
+Scripts in `analysis/l2_l4/H2/`. Slip fraction analysis — the mechanistic bridge between H1 (more contacts) and H3 (smoother velocity). Answers: are L4's contacts gripping while L1's are slipping?
+
+```
+analysis/l2_l4/H2/
+  __init__.py
+  plot_slip_summary.py        # slip fraction bar chart (1x3, all terrains)
+  plot_phase_folded_slip.py   # phase-folded slip ratio per leg (diagnostic, not paper)
+  figures/
+```
+
+**Slip fraction summary** (`plot_slip_summary.py`)
+- 1×3 figure: one panel per terrain (flat, step, rough), shared y-axis.
+- x = frequency (per-terrain, no blank slots), grouped bars colored by morphology (MORPH_COLORS).
+- y = slip fraction: % of contact-timesteps where `F_tangent / (mu * F_normal) >= 0.95` (at friction cone boundary).
+- mu loaded from each terrain's `optimization_bests.csv` (differs per terrain optimization). Annotated on each panel.
+- Error bars from trial-level std.
+- No body contact (belly-drag is not productive leg propulsion). All 4 legs pooled per trial.
+
+**Data pipeline** (from MuJoCo to plot):
+1. At each 2kHz timestep, `simulation.py:_extract_contact_data()` iterates all active MuJoCo contacts.
+2. Each contact is classified by body pair: `geom → body` mapping filters to **leg-terrain only** (leg bodies 2-5 vs world body 0). Leg-leg, leg-chassis, and chassis-terrain contacts are excluded.
+3. `mj_contactForce(model, data, i, force_buf)` returns a 6-vector in the **contact frame**: `[normal, tangent1, tangent2, torsional, roll1, roll2]`. Normal force = `buf[0]` (always >= 0). Tangential magnitude = `sqrt(buf[1]^2 + buf[2]^2)`.
+4. If a leg has multiple contact points in one timestep, forces are **summed** across all contacts for that leg (both normal and tangential sum linearly).
+5. Stored per-timestep in NPZ as `leg_normal_force` (T,4) and `leg_tangent_force` (T,4).
+6. Slip ratio = `F_tangent / (mu * F_normal)`. Ratio = 1.0 is exactly the Coulomb friction limit. Threshold >= 0.95 counts as "slipping."
+7. Timesteps with `F_normal < 1e-10` filtered out (grazing contacts would blow up the ratio).
+
+**Phase-folded slip ratio** (`plot_phase_folded_slip.py`) — diagnostic, not paper figure
+- Grid: rows = terrain, columns = frequencies. Per-leg slip ratio traces overlaid, colored by morphology.
+- Each leg is a separate line (same color); shading = ±1 std across trials.
+- Slip ratio = `F_t / (mu * F_n)` per phase bin (36 bins, 10° each), averaged within bin, then across trials.
+- **Negative result**: flat terrain shows some periodic dips (slip drops to 0.3-0.5 during non-thrust phase), but step and rough are uniformly noisy — terrain randomizes the phase relationship. No meaningful phase structure worth reporting in paper.
+- All 4 legs overlap heavily within each morphology — the per-leg traces are nearly identical (verified: all morphologies have symmetric ~24-46% contact per leg, see below).
+
+**Per-leg contact verification** (raw NPZ inspection):
+- Concern was raised that L1 might only have 1 leg with contact (would invalidate pooling). Verified from raw data:
+
+| Morphology | Per-leg contact % | Pattern |
+|-----------|-------------------|---------|
+| L1 (scene1) | ~24% each | Legs take turns, 1/4 cycle each |
+| L2 (scene2) | ~32-34% each | More overlap, 2 spokes extend contact |
+| L4 (scene4) | ~40-46% each | Even more overlap, 4 spokes keep legs grounded longer |
+| WR (wheel) | ~81-83% each | Nearly always in contact |
+
+- Contact fraction is symmetric across FR/FL/BR/BL within each morphology. All 4 legs have contact for all morphologies — the MuJoCo models all have 4 physical legs with collision geometry.
+- The L1→L2→L4→WR contact fraction progression directly supports H1.
+
+**Usage** (from `milliquad_opt/`):
+```bash
+# Slip fraction bar chart — all terrains
+uv run python -m analysis.l2_l4.H2.plot_slip_summary \
+    results/20260228T013353_rk4_flat \
+    results/20260228T230022_step_q60_rk-warm \
+    results/20260228T202903_rough_spatial_rk4
+
+# Phase-folded slip ratio — all terrains (diagnostic)
+uv run python -m analysis.l2_l4.H2.plot_phase_folded_slip \
+    results/20260228T013353_rk4_flat \
+    results/20260228T230022_step_q60_rk-warm \
+    results/20260228T202903_rough_spatial_rk4
+```
+
+#### Slip fraction summary
+![Slip summary all terrains](analysis/l2_l4/H2/figures/20260302T194624_slip_summary_flat_step_rough.png)
+
+#### Phase-folded slip ratio (diagnostic)
+![Phase-folded slip all terrains](analysis/l2_l4/H2/figures/20260302T211650_phase_folded_slip_flat_step_rough.png)
+
+**Key findings from H2 (slip vs grip):**
+
+- Monotonic ordering on flat and step: L1 (~85%) > L2 (~78%) > L4 (~72%) > WR (~58%). L1's single contact is almost always at the friction cone.
+- WR has the **lowest** slip fraction everywhere — smooth geometry distributes force best per contact. But WR *fails terrain traversal* (H1: 3-5/15 step, 7/30 rough pass rate). Low slip fraction doesn't help if you can't maintain productive contact.
+- Rough terrain (mu=0.787) has lower absolute slip fractions than flat/step (mu~0.36) because the rough optimizer found 2x higher friction — wider cone, harder to reach the boundary. The morphology ordering is less clean here.
+- L4 is the best balance: moderately low slip fraction AND high traversal success. It distributes force well enough to stay mostly in grip, while its discrete spokes can engage terrain features that the wheel slides over.
+- Phase-folded slip ratio is uniformly high (~0.7-1.0) across all drive angles — no meaningful phase dependence. On flat, periodic dips visible but step/rough destroy the pattern. This is a negative result: slip doesn't concentrate at specific gait phases.
+
+**Caveats:**
+- mu differs per terrain (flat/step ~0.36, rough ~0.79) because each terrain has independently optimized contact parameters. Cross-terrain absolute slip fraction values are not directly comparable — the ordering within each terrain panel is what matters.
+- WR survivorship bias applies here too: only passing trials are shown. WR's low slip fraction on terrain comes from the few trials that happened to succeed.
+- Tangential forces are summed per-leg when multiple contact points exist. For spoke morphologies this is typically 1 contact per leg, but WR wheel segments can have 2-3 simultaneous contact points.
 
 ---
 
