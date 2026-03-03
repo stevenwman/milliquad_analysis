@@ -224,3 +224,76 @@ The Euler run also found scene1_f30 at 1.1% error — the best single-ref result
   - Run with full N_TRIALS jittered trials, 3 randomly selected (not error-sorted)
   - Written to CSV alongside regular refs for plotting
 - Warm-started from Euler step best params
+
+---
+
+## Step Gate Tightening: 90% → 65% (2026-03-03)
+
+### Motivation
+
+The 90% spatial gate (`active_cutoff = step_start_x + 0.9 * (step_end_x - step_start_x)`) includes trajectory right up to the cliff edge. Robots that reach the last step are already beginning to fall, which corrupts velocity (decelerating or reversing), pitch (sudden tumble), and lateral measurements. The experimental data uses a q60 index gate (45%–75% of recording) which implicitly avoids this by ending much earlier. Tightening the sim gate to 65% better matches the experimental intent.
+
+### Gate geometry
+
+| Gate | Cutoff X (mm) | Region measured | Step coverage |
+|------|--------------|-----------------|---------------|
+| 90% (original) | 96.4 | 50.0 → 96.4 | Steps 1–7 + most of final platform |
+| 75% | 88.6 | 50.0 → 88.6 | Steps 1–6 |
+| 65% | 83.5 | 50.0 → 83.5 | Steps 1–5 |
+
+Step zone: `STEP_START_X = 50mm`, `STEP_END_X = 101.5mm` (7 × 4.5mm steps + 20mm final platform).
+
+### Impact on metrics (same optimizer params, recomputed from NPZ)
+
+Measured from `20260228T230022_step_q60_rk-warm` validation trajectories.
+
+**Velocity (cm/s)**:
+
+| Ref | 90% gate | 75% gate | 65% gate | Δ 90→65 |
+|-----|----------|----------|----------|---------|
+| scene1_f10 | 1.8 | 1.6 | 1.4 | -21% |
+| scene1_f20 | 3.4 | 3.2 | 3.1 | -8% |
+| scene1_f30 | 3.3 | 3.2 | 3.1 | -6% |
+| scene2_f10 | 2.3 | 2.2 | 2.1 | -9% |
+| scene2_f20 | 6.1 | 5.9 | 5.7 | -7% |
+| scene2_f30 | 10.4 | 10.1 | 9.9 | -5% |
+| scene4_f10 | 6.3 | 6.0 | 5.7 | -10% |
+| scene4_f20 | 10.0 | 9.6 | 9.3 | -7% |
+| scene4_f30 | 11.6 | 10.9 | 10.6 | -9% |
+| wheel_f30 | 6.0 | 5.2 | 4.9 | -18% |
+
+Velocity drops 5–21%. Largest drops at low frequency (scene1_f10) and wheel — these robots are slowest and spend proportionally more time near the cliff edge within the 90% window.
+
+**Pitch RMS (°)**:
+
+| Ref | 90% gate | 75% gate | 65% gate | Δ 90→65 |
+|-----|----------|----------|----------|---------|
+| scene1_f10 | 5.9 | 5.3 | 4.7 | -20% |
+| scene1_f20 | 9.1 | 7.8 | 7.2 | -21% |
+| scene1_f30 | 12.1 | 11.2 | 10.4 | -14% |
+| scene2_f10 | 6.4 | 5.7 | 5.1 | -20% |
+| scene2_f20 | 9.7 | 8.3 | 7.8 | -20% |
+| scene2_f30 | 9.9 | 8.3 | 7.6 | -23% |
+| scene4_f10 | 5.9 | 4.0 | 3.3 | -44% |
+| scene4_f20 | 6.3 | 5.4 | 5.1 | -19% |
+| scene4_f30 | 6.6 | 5.7 | 5.3 | -20% |
+| wheel_f30 | 4.7 | 3.8 | 3.5 | -26% |
+
+Pitch RMS drops up to 44% (scene4_f10). The cliff-adjacent portion of the trajectory has the largest pitch oscillations — excluding it gives a cleaner steady-state measurement.
+
+### Retraining at 65%
+
+Post-hoc re-windowing from NPZ (as in `plot_megacomposite_nocot_065.py`) changes the reported metrics but not the underlying physics params. The optimizer's cost function used 90% gating during training, so the fitted params are biased toward 90% performance. To get params optimized for 65% gating:
+
+- **Config**: `config_step_065.py` — exact copy of `config_step.py` with `0.9 → 0.65` on the `active_cutoff` line
+- **Command**: `uv run python optimizer.py --terrain step_065 --warm-start-from results/20260228T230022_step_q60_rk-warm --suffix step_065gate`
+- **Expectation**: Params may shift slightly since the cost landscape changes. The optimizer no longer sees cliff-edge behavior, which could affect friction and contact params.
+
+### Files
+
+| File | Purpose |
+|------|---------|
+| `config_step.py` | Original step config (90% gate) — **unchanged** |
+| `config_step_065.py` | Copy with 65% gate for retraining |
+| `analysis/plot_megacomposite_nocot_065.py` | Nocot megacomposite with 65% re-windowed metrics |
+| `analysis/temp/plot_pitch_mega.py` | Per-condition pitch time series (uses 65% gate, 100% trim) |

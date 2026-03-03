@@ -181,6 +181,40 @@ All X markers (failure modes, all-invalid combos) now receive morphology-based h
 
 ---
 
+## Pitch Mega Figure: Sim vs Exp Gating Mismatch
+
+`analysis/temp/plot_pitch_mega.py` produces per-condition pitch time series and XY paths for step terrain. Sim and exp use **different windowing methods** for pitch RMS — this is intentional, not a bug.
+
+### Sim pitch RMS: spatial gating
+- Window: `STEP_START_X` (50mm) to `CUTOFF_X` (65% of step region = 83.5mm)
+- Previously 90% (96.4mm), tightened to 65% to avoid cliff-edge artifacts and better match exp's q60 intent
+- Calculation: `std(pitch[enter_idx : gate_idx+1])`
+- Trials that never reach `CUTOFF_X` are excluded (e.g., wheel f30 trial 0 stuck at 79mm)
+- Display: trajectory plotted to 100% (`TRIM_X = STEP_END_X`), shading shows 65% gate region
+
+### Exp pitch RMS: q60 index gating
+- Window: indices `[0.45*n : 0.75*n]` of the full CSV recording (30% centered at 60%)
+- Calculation: `std(theta[lo : hi])`
+- Consistent with `extract_step_pitch_q60()` in `experimental_data/plot_pitch_vs_freq.py`
+- No spatial information available in exp data — cannot apply spatial gating
+
+### Why they differ
+Experimental CSVs don't have forward position data in a sim-compatible coordinate frame, so spatial gating is impossible. The q60 window was chosen by the student as the best trajectory-relative approximation: skip the initial transient (first 45%), capture steady-state locomotion on the steps (45%–75%), and avoid cliff-fall artifacts (last 25%). The sim's 65% spatial gate achieves the same intent more precisely using known step geometry — both exclude roughly the last third of the trajectory where cliff-fall artifacts dominate.
+
+### Gate tightening (90% → 65%)
+The original optimizer and validation pipeline used 90% spatial gate, which included trajectory near the cliff edge. This inflated both pitch RMS (up to 44% higher) and velocity (up to 21% higher) compared to 65%. The 65% gate better matches exp's q60 intent and gives cleaner steady-state measurements. See `SPATIAL_GATING_RESULTS.md` for detailed comparison tables.
+
+**Optimizer retraining**: `config_step_065.py` retrains with 65% gate. The 90% optimizer (`config_step.py`) is preserved unchanged. Post-hoc re-windowing from NPZ (`plot_megacomposite_nocot_065.py`) can approximate 65% metrics without retraining, but the fitted params are biased toward 90% performance.
+
+### Verification against nocot
+Sim pitch RMS from the mega figure matches the `pitch_rms` column in the validation CSV (same `compute_pitch_rms` function, same spatial gate, same trial exclusion via gate-clearing). The `_065` variant recomputes from NPZ at 65%. Exp step pitch is **not yet in the nocot megacomposite** (panels are blank for step exp pitch). The mega figure is the first visualization of exp step pitch.
+
+### XY path data
+- **Sim**: `pos_x` (forward) vs `pos_z` (lateral) from MuJoCo qpos. Thin line = full traj to 100% (TRIM_X), thick = spatially gated portion (65%). Gate start/end shown as vertical lines.
+- **Exp**: Average of mass_A and mass_C marker positions (CSV cols 1-2 and 5-6). `x = (avg_x[0] - avg_x) * 1000` (flipped to match sim forward direction). Thin = full recording, thick = q60 window.
+
+---
+
 ## Script Inventory
 
 | Script | Purpose | Status |
