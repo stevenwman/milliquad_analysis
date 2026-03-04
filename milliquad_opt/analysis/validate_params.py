@@ -216,12 +216,15 @@ def main():
     if is_step:
         step_start_x = getattr(config_mod, "STEP_START_X", None)
         step_end_x = getattr(config_mod, "STEP_END_X", None)
+        gate_fraction = getattr(config_mod, "GATE_FRACTION", 0.9)
     elif is_rough:
         step_start_x = config_mod.FLAT_LEAD
         step_end_x = config_mod.FLAT_LEAD + 2 * config_mod._X_HALF
+        gate_fraction = 0.9
     else:
         step_start_x = None
         step_end_x = None
+        gate_fraction = 0.9
 
     if is_rough:
         y_jitter = config_mod.Y_JITTER
@@ -313,10 +316,22 @@ def main():
                                "min_window_vx": 0.0, "pitch_rms": None, "max_x": None})
                 continue
 
-            vx = extract_velocity(traj, SETTLE_TIME, step_start_x, step_end_x)
+            vx = extract_velocity(traj, SETTLE_TIME, step_start_x, step_end_x,
+                                  gate_fraction=gate_fraction)
             traj_key = f"{rid}_t{t}"
             _store_trajectory_arrays(traj, traj_key, traj_arrays)
             max_x = float(traj_arrays[f"{traj_key}_pos_x"].max())
+
+            if vx is None:
+                # Didn't reach spatial gate
+                print(f" GATE FAIL (max_x={max_x*1000:.1f}mm)")
+                trials.append({"trial": t, "seed": seed, "jitter_type": jitter_type,
+                               "jitter_value": jitter_value, "vx": None,
+                               "err": float("inf"), "cot": None, "crash": False,
+                               "min_window_vx": 0.0, "pitch_rms": None,
+                               "max_x": max_x})
+                continue
+
             err = None if is_failure else abs(vx - target) / target * 100
             cot = compute_cot(traj, mass, SETTLE_TIME,
                               step_start_x=step_start_x, step_end_x=step_end_x)
@@ -338,7 +353,7 @@ def main():
                            "max_x": max_x})
 
         # Select top N_SELECT
-        valid = [tr for tr in trials if not tr["crash"]]
+        valid = [tr for tr in trials if not tr["crash"] and tr["vx"] is not None]
         if is_failure:
             # Random selection (like exploratory — no meaningful target to rank by)
             if len(valid) > N_SELECT:
@@ -471,10 +486,20 @@ def main():
                                    "pitch_rms": None, "max_x": None})
                     continue
 
-                vx = extract_velocity(traj, SETTLE_TIME, step_start_x, step_end_x)
+                vx = extract_velocity(traj, SETTLE_TIME, step_start_x, step_end_x,
+                                      gate_fraction=gate_fraction)
                 traj_key = f"{rid}_t{t}"
                 _store_trajectory_arrays(traj, traj_key, traj_arrays)
                 max_x = float(traj_arrays[f"{traj_key}_pos_x"].max())
+
+                if vx is None:
+                    print(f" GATE FAIL (max_x={max_x*1000:.1f}mm)")
+                    trials.append({"trial": t, "seed": seed, "jitter_type": jitter_type,
+                                   "jitter_value": jitter_value, "vx": None,
+                                   "cot": None, "crash": False, "min_window_vx": 0.0,
+                                   "pitch_rms": None, "max_x": max_x})
+                    continue
+
                 cot = compute_cot(traj, mass, SETTLE_TIME,
                                   step_start_x=step_start_x, step_end_x=step_end_x)
                 mwv = min_window_velocity(traj, freq, SETTLE_TIME,
@@ -491,7 +516,7 @@ def main():
                                "pitch_rms": pitch_rms, "max_x": max_x})
 
             # Random selection (no sorting by error)
-            valid = [tr for tr in trials if not tr["crash"]]
+            valid = [tr for tr in trials if not tr["crash"] and tr["vx"] is not None]
             if len(valid) > N_SELECT:
                 rng_sel = np.random.default_rng(expl_seed_base + expl_idx)
                 sel_indices = rng_sel.choice(len(valid), size=N_SELECT, replace=False)
@@ -573,7 +598,7 @@ def main():
 
     # --- Video recording pass ---
     if args.record and replay_specs:
-        video_dir = args.run_dir / "videos"
+        video_dir = args.run_dir / f"{datetime.now().strftime('%Y%m%dT%H%M%S')}_videos"
         video_dir.mkdir(parents=True, exist_ok=True)
         print(f"\n  Recording {len(replay_specs)} selected trials to {video_dir}/")
         for i, spec in enumerate(replay_specs):

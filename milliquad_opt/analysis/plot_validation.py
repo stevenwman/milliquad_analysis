@@ -365,30 +365,35 @@ def plot_panel(
             all_freqs.update(freqs)
     all_freqs_sorted = sorted(all_freqs)
     if all_freqs_sorted:
-        pad = max(scatter_dodge_width / 2 + intra_spread / 2 + 1, 3) if scatter_only else 3
+        pad = max(scatter_dodge_width / 2 + intra_spread / 2 + 2, 3) if scatter_only else 3
         ax.set_xlim(all_freqs_sorted[0] - pad, all_freqs_sorted[-1] + pad)
         # Bracket ticks + grey gap bands (unified for all modes)
         if scatter_only:
             half_spread = scatter_dodge_width / 2 + intra_spread / 2
         else:
             half_spread = dodge_width / 2 + 0.75
-        edge_ticks = []
-        for f in all_freqs_sorted:
-            edge_ticks.extend([f - half_spread, f + half_spread])
-        ax.set_xticks(edge_ticks)
-        ax.set_xticklabels([""] * len(edge_ticks))
-        ax.set_xticks(all_freqs_sorted, minor=True)
-        ax.set_xticklabels([str(int(f)) for f in all_freqs_sorted], minor=True)
-        ax.tick_params(which="minor", length=0)
-        # Grey bands in gaps between bracket zones (white inside brackets)
-        x_lo = all_freqs_sorted[0] - pad
-        x_hi = all_freqs_sorted[-1] + pad
-        ax.axvspan(x_lo, all_freqs_sorted[0] - half_spread, color="#f0f0f0", zorder=0)
-        for j in range(len(all_freqs_sorted) - 1):
-            ax.axvspan(all_freqs_sorted[j] + half_spread,
-                       all_freqs_sorted[j + 1] - half_spread,
-                       color="#f0f0f0", zorder=0)
-        ax.axvspan(all_freqs_sorted[-1] + half_spread, x_hi, color="#f0f0f0", zorder=0)
+        if half_spread < 0.1:
+            # No dodge — plain frequency ticks, no grey bands
+            ax.set_xticks(all_freqs_sorted)
+            ax.set_xticklabels([str(int(f)) for f in all_freqs_sorted])
+        else:
+            edge_ticks = []
+            for f in all_freqs_sorted:
+                edge_ticks.extend([f - half_spread, f + half_spread])
+            ax.set_xticks(edge_ticks)
+            ax.set_xticklabels([""] * len(edge_ticks))
+            ax.set_xticks(all_freqs_sorted, minor=True)
+            ax.set_xticklabels([str(int(f)) for f in all_freqs_sorted], minor=True)
+            ax.tick_params(which="minor", length=0)
+            # Grey bands in gaps between bracket zones (white inside brackets)
+            x_lo = all_freqs_sorted[0] - pad
+            x_hi = all_freqs_sorted[-1] + pad
+            ax.axvspan(x_lo, all_freqs_sorted[0] - half_spread, color="#f0f0f0", zorder=0)
+            for j in range(len(all_freqs_sorted) - 1):
+                ax.axvspan(all_freqs_sorted[j] + half_spread,
+                           all_freqs_sorted[j + 1] - half_spread,
+                           color="#f0f0f0", zorder=0)
+            ax.axvspan(all_freqs_sorted[-1] + half_spread, x_hi, color="#f0f0f0", zorder=0)
 
 
 def main():

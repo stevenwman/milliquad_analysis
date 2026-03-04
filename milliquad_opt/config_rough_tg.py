@@ -1,11 +1,13 @@
-"""Flat terrain optimization config with per-condition time gating.
+"""Rough terrain optimization config with per-condition time gating.
 
-Copy of config_flat.py. Only change: each REFERENCE_DATA entry carries
+Copy of config_rough.py. Only change: each REFERENCE_DATA entry carries
 ``trial_duration`` (mean experimental recording length in seconds).
 The cost function truncates the sim trajectory to SETTLE_TIME + trial_duration
 so velocity is measured over the same window as the experiment.
 
-Run with:  uv run python optimizer.py --terrain flat_tg --suffix flat_tg
+SIM_DURATION bumped from 2.0 to 3.1 to accommodate scene1_f10 (2.95s trials).
+
+Run with:  uv run python optimizer.py --terrain rough_tg --suffix rough_tg
 """
 
 from typing import Any
@@ -21,35 +23,50 @@ from config import (
 )
 
 # ---------------------------------------------------------------------------
-# Scene XMLs (flat terrain, RK4 baked in)
+# Scene XMLs (rough terrain, RK4 baked in)
+# No wheel — only 40% success rate on rough terrain
 # ---------------------------------------------------------------------------
 MJCF_PATHS: dict[str, str] = {
-    "scene1":      str(PACKAGE_DIR / "robots" / "quad"  / "scene_1_flat.xml"),
-    "scene2":      str(PACKAGE_DIR / "robots" / "quad"  / "scene_2_flat.xml"),
-    "scene4":      str(PACKAGE_DIR / "robots" / "quad"  / "scene_4_flat.xml"),
-    "scene_wheel": str(PACKAGE_DIR / "robots" / "wheel" / "scene_wheel_flat.xml"),
+    "scene1": str(PACKAGE_DIR / "robots" / "quad" / "scene_1_rough.xml"),
+    "scene2": str(PACKAGE_DIR / "robots" / "quad" / "scene_2_rough.xml"),
+    "scene4": str(PACKAGE_DIR / "robots" / "quad" / "scene_4_rough.xml"),
 }
+
+# ---------------------------------------------------------------------------
+# Terrain geometry (fixed layout — seed=42 heightmap)
+# ---------------------------------------------------------------------------
+TERRAIN_NX = 10
+TERRAIN_NY = 6
+TERRAIN_SL = 0.005
+N_TILES = 3
+FLAT_LEAD = 0.005
+
+# Spawn offset: near terrain start, 10mm above ground
+_TOTAL_NX = TERRAIN_NX * N_TILES
+_X_HALF = _TOTAL_NX * TERRAIN_SL / 2.0
+SPAWN_X = FLAT_LEAD + 0.025  # 25mm into terrain
+SPAWN_Z_RAISE = 0.01
 
 # ---------------------------------------------------------------------------
 # Simulation / optimization parameters
 # ---------------------------------------------------------------------------
-SIM_DURATION = 3.0
+SIM_DURATION = 3.1  # bumped from 2.0 to fit scene1_f10 (2.95s trial + 0.1s settle)
 N_CALLS = 4800
 BATCH_SIZE = 16
-INIT_YAW_JITTER_DEG = 2
 INIT_JITTER_TRIALS = 3
-INIT_JITTER_SEED = 12345
+Y_JITTER = 0.003           # ±3mm Y offset
+Y_JITTER_SEED = 77777
 VELOCITY_DEADZONE = False
 JITTER_AGGREGATION = "median"
 
 # Cost weights
 VELOCITY_COST_WEIGHT = 5.0
-TUMBLE_COST_WEIGHT = 1.0
+TUMBLE_COST_WEIGHT = 2.0
 LATERAL_COST_WEIGHT = 5.0
 VELOCITY_VARIANCE_WEIGHT = 2.0
 YAW_COST_WEIGHT = 1.0
 YAW_THRESHOLD_DEG = 60.0
-TUMBLE_THRESHOLD = 0.0
+TUMBLE_THRESHOLD = 0.17     # cos(80°) — penalize tilt past 80°
 TUMBLE_PENALTY_SCALE = 0.1
 
 # CMA-ES
@@ -57,56 +74,44 @@ CMAES_SIGMA0 = 0.3
 OPTIMIZER_RANDOM_STATE = 69420
 
 # ---------------------------------------------------------------------------
-# Warm-start: best from 20260225T122342_flat_10_30_50 (Euler, cost=0.1276)
+# Warm-start: best from zzz_rough_v2 (Euler, cost=0.3949)
 # ---------------------------------------------------------------------------
 CMAES_X0: dict[str, float] | None = {
-    "sliding_friction": 0.4067415162382437,
-    "torsional_friction": 0.0001598832061548777,
-    "rolling_friction": 4.591348631378625e-06,
-    "solref_timeconst": 0.002046553443113131,
-    "solref_dampratio": 3.8186561171444096,
-    "solimp_dmin": 0.43524706654498085,
-    "solimp_delta_d": 0.988954449244754,
-    "solimp_width": 4.6887126279039634e-05,
-    "solimp_midpoint": 0.6473380150564967,
-    "solimp_power": 5.037567575958023,
-    "magnetic_moment_fudge": 0.6545005423370444,
-    "magnetic_field_fudge": 1.1389204964634818,
-    "dof_damping": 5.324867233622363e-10,
-    "noslip_iterations": 0.16236228774673808,
-    "noslip_tolerance": 1.0341954878538795e-06,
-    "margin": 0.0006920906564202648,
+    "sliding_friction": 0.625649065196989,
+    "torsional_friction": 0.0001577896719328836,
+    "rolling_friction": 1.6999818728634566e-06,
+    "solref_timeconst": 0.0008451887608978624,
+    "solref_dampratio": 4.077074329871974,
+    "solimp_dmin": 0.3285187962568,
+    "solimp_delta_d": 0.602195907788976,
+    "solimp_width": 2.101968017904397e-05,
+    "solimp_midpoint": 0.8771918576448682,
+    "solimp_power": 5.413792421292177,
+    "magnetic_moment_fudge": 0.8957245963324068,
+    "magnetic_field_fudge": 1.165693360752599,
+    "dof_damping": 9.535192105821565e-10,
+    "noslip_iterations": 0.37419076188152406,
+    "noslip_tolerance": 1.1735746000014794e-06,
+    "margin": 4.577884774903134e-06,
 }
 
 # ---------------------------------------------------------------------------
-# Reference data (15 flat conditions + 1 failure @ weight=0)
+# Reference data (7 rough conditions, >=60% success rate)
 #
-# trial_duration = mean experimental recording length (seconds), computed
-# from CSVs in experimental_data/csv/flat/.  Used by calculate_cost to
-# truncate the sim measurement window.
+# trial_duration = mean experimental recording length (seconds), from
+# experimental_data/csv/random_terrain_raw_with_time.csv.
 # ---------------------------------------------------------------------------
 REFERENCE_DATA: list[dict[str, Any]] = [
-    # Single leg (scene1)
-    {"scene": "scene1", "ctrl_freq": 10.0, "speed": 0.0512, "speed_std": 0.0024, "weight": 1.0, "trial_duration": 2.625},
-    {"scene": "scene1", "ctrl_freq": 20.0, "speed": 0.1264, "speed_std": 0.0047, "weight": 1.0, "trial_duration": 1.093},
-    {"scene": "scene1", "ctrl_freq": 30.0, "speed": 0.1187, "speed_std": 0.0127, "weight": 1.0, "trial_duration": 1.197},
-    {"scene": "scene1", "ctrl_freq": 50.0, "speed": 0.1483, "speed_std": 0.0131, "weight": 1.0, "trial_duration": 1.023},
-    # Double leg (scene2)
-    {"scene": "scene2", "ctrl_freq": 10.0, "speed": 0.0832, "speed_std": 0.0014, "weight": 1.0, "trial_duration": 1.567},
-    {"scene": "scene2", "ctrl_freq": 20.0, "speed": 0.1131, "speed_std": 0.0420, "weight": 1.0, "trial_duration": 1.021},
-    {"scene": "scene2", "ctrl_freq": 30.0, "speed": 0.1796, "speed_std": 0.0179, "weight": 1.0, "trial_duration": 0.827},
-    {"scene": "scene2", "ctrl_freq": 50.0, "speed": 0.2633, "speed_std": 0.0257, "weight": 1.0, "trial_duration": 0.663},
-    # Quad leg (scene4)
-    {"scene": "scene4", "ctrl_freq": 10.0, "speed": 0.1121, "speed_std": 0.0060, "weight": 1.0, "trial_duration": 1.245},
-    {"scene": "scene4", "ctrl_freq": 20.0, "speed": 0.1841, "speed_std": 0.0156, "weight": 1.0, "trial_duration": 0.712},
-    {"scene": "scene4", "ctrl_freq": 30.0, "speed": 0.2747, "speed_std": 0.0207, "weight": 1.0, "trial_duration": 0.589},
-    {"scene": "scene4", "ctrl_freq": 50.0, "speed": 0.3274, "speed_std": 0.0556, "weight": 1.0, "trial_duration": 0.547},
-    # Wheel
-    {"scene": "scene_wheel", "ctrl_freq": 10.0, "speed": 0.1432, "speed_std": 0.0013, "weight": 1.0, "trial_duration": 0.965},
-    {"scene": "scene_wheel", "ctrl_freq": 20.0, "speed": 0.3058, "speed_std": 0.0068, "weight": 1.0, "trial_duration": 0.478},
-    {"scene": "scene_wheel", "ctrl_freq": 30.0, "speed": 0.4493, "speed_std": 0.0183, "weight": 1.0, "trial_duration": 0.384},
-    # WR f50: exp robot self-destructs at 50Hz; sim succeeds (~720 mm/s). Validation only.
-    {"scene": "scene_wheel", "ctrl_freq": 50.0, "speed": 0.0, "speed_std": 0.0, "weight": 0.0},
+    # Single leg (scene1) — f10: 80%, f30: 80%
+    {"scene": "scene1", "ctrl_freq": 10.0, "speed": 0.04292, "speed_std": 0.00101, "weight": 1.0, "trial_duration": 2.95},
+    {"scene": "scene1", "ctrl_freq": 30.0, "speed": 0.08162, "speed_std": 0.00974, "weight": 1.0, "trial_duration": 1.61},
+    # Double leg (scene2) — f10: 100%, f30: 80%, f50: 60%
+    {"scene": "scene2", "ctrl_freq": 10.0, "speed": 0.06559, "speed_std": 0.00548, "weight": 1.0, "trial_duration": 1.95},
+    {"scene": "scene2", "ctrl_freq": 30.0, "speed": 0.12888, "speed_std": 0.00027, "weight": 1.0, "trial_duration": 1.11},
+    {"scene": "scene2", "ctrl_freq": 50.0, "speed": 0.10624, "speed_std": 0.03240, "weight": 1.0, "trial_duration": 1.10},
+    # Quad leg (scene4) — f10: 100%, f30: 80%
+    {"scene": "scene4", "ctrl_freq": 10.0, "speed": 0.08565, "speed_std": 0.00695, "weight": 1.0, "trial_duration": 1.53},
+    {"scene": "scene4", "ctrl_freq": 30.0, "speed": 0.14602, "speed_std": 0.03684, "weight": 1.0, "trial_duration": 0.79},
 ]
 
 # ---------------------------------------------------------------------------
@@ -132,12 +137,12 @@ def calculate_cost(
     speed_std: float = 0.0,
     verbose: bool = True,
 ) -> dict[str, float]:
-    """Flat cost with per-condition time gating.
+    """Rough cost with per-condition time gating.
 
     Velocity (and lateral/yaw) are measured from SETTLE_TIME to
     SETTLE_TIME + trial_duration, where trial_duration is the mean
     experimental recording length for this condition.  Falls back to
-    full trajectory if no duration is registered (e.g. weight=0 refs).
+    full trajectory if no duration is registered.
     """
     fail = {
         "total_cost": COST_FAILURE, "avg_forward_velocity": 0,
@@ -180,9 +185,7 @@ def calculate_cost(
         avg_forward_velocity = forward_displacement / active_duration
 
     vel_deviation = avg_forward_velocity - target_velocity
-    if target_velocity == 0.0:
-        velocity_error = 0.0
-    elif VELOCITY_DEADZONE and speed_std > 0.0 and abs(vel_deviation) <= speed_std:
+    if VELOCITY_DEADZONE and speed_std > 0.0 and abs(vel_deviation) <= speed_std:
         velocity_error = 0.0
     elif VELOCITY_DEADZONE and speed_std > 0.0:
         excess = abs(vel_deviation) - speed_std

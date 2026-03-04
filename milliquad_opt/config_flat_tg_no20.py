@@ -1,11 +1,9 @@
-"""Flat terrain optimization config with per-condition time gating.
+"""Flat terrain optimization config with per-condition time gating (no f20, no WR f50).
 
-Copy of config_flat.py. Only change: each REFERENCE_DATA entry carries
-``trial_duration`` (mean experimental recording length in seconds).
-The cost function truncates the sim trajectory to SETTLE_TIME + trial_duration
-so velocity is measured over the same window as the experiment.
+Copy of config_flat_tg.py with all 20 Hz conditions and wheel f50 removed.
+12 active reference conditions: scene1/2/4 × f10/f30/f50 + wheel f10/f30.
 
-Run with:  uv run python optimizer.py --terrain flat_tg --suffix flat_tg
+Run with:  uv run python optimizer.py --terrain flat_tg_no20 --suffix flat_tg_no20
 """
 
 from typing import Any
@@ -79,7 +77,7 @@ CMAES_X0: dict[str, float] | None = {
 }
 
 # ---------------------------------------------------------------------------
-# Reference data (15 flat conditions + 1 failure @ weight=0)
+# Reference data (12 conditions: no f20, no WR f50)
 #
 # trial_duration = mean experimental recording length (seconds), computed
 # from CSVs in experimental_data/csv/flat/.  Used by calculate_cost to
@@ -88,25 +86,19 @@ CMAES_X0: dict[str, float] | None = {
 REFERENCE_DATA: list[dict[str, Any]] = [
     # Single leg (scene1)
     {"scene": "scene1", "ctrl_freq": 10.0, "speed": 0.0512, "speed_std": 0.0024, "weight": 1.0, "trial_duration": 2.625},
-    {"scene": "scene1", "ctrl_freq": 20.0, "speed": 0.1264, "speed_std": 0.0047, "weight": 1.0, "trial_duration": 1.093},
     {"scene": "scene1", "ctrl_freq": 30.0, "speed": 0.1187, "speed_std": 0.0127, "weight": 1.0, "trial_duration": 1.197},
     {"scene": "scene1", "ctrl_freq": 50.0, "speed": 0.1483, "speed_std": 0.0131, "weight": 1.0, "trial_duration": 1.023},
     # Double leg (scene2)
     {"scene": "scene2", "ctrl_freq": 10.0, "speed": 0.0832, "speed_std": 0.0014, "weight": 1.0, "trial_duration": 1.567},
-    {"scene": "scene2", "ctrl_freq": 20.0, "speed": 0.1131, "speed_std": 0.0420, "weight": 1.0, "trial_duration": 1.021},
     {"scene": "scene2", "ctrl_freq": 30.0, "speed": 0.1796, "speed_std": 0.0179, "weight": 1.0, "trial_duration": 0.827},
     {"scene": "scene2", "ctrl_freq": 50.0, "speed": 0.2633, "speed_std": 0.0257, "weight": 1.0, "trial_duration": 0.663},
     # Quad leg (scene4)
     {"scene": "scene4", "ctrl_freq": 10.0, "speed": 0.1121, "speed_std": 0.0060, "weight": 1.0, "trial_duration": 1.245},
-    {"scene": "scene4", "ctrl_freq": 20.0, "speed": 0.1841, "speed_std": 0.0156, "weight": 1.0, "trial_duration": 0.712},
     {"scene": "scene4", "ctrl_freq": 30.0, "speed": 0.2747, "speed_std": 0.0207, "weight": 1.0, "trial_duration": 0.589},
     {"scene": "scene4", "ctrl_freq": 50.0, "speed": 0.3274, "speed_std": 0.0556, "weight": 1.0, "trial_duration": 0.547},
     # Wheel
     {"scene": "scene_wheel", "ctrl_freq": 10.0, "speed": 0.1432, "speed_std": 0.0013, "weight": 1.0, "trial_duration": 0.965},
-    {"scene": "scene_wheel", "ctrl_freq": 20.0, "speed": 0.3058, "speed_std": 0.0068, "weight": 1.0, "trial_duration": 0.478},
     {"scene": "scene_wheel", "ctrl_freq": 30.0, "speed": 0.4493, "speed_std": 0.0183, "weight": 1.0, "trial_duration": 0.384},
-    # WR f50: exp robot self-destructs at 50Hz; sim succeeds (~720 mm/s). Validation only.
-    {"scene": "scene_wheel", "ctrl_freq": 50.0, "speed": 0.0, "speed_std": 0.0, "weight": 0.0},
 ]
 
 # ---------------------------------------------------------------------------

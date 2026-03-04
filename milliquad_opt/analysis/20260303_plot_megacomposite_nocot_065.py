@@ -66,6 +66,10 @@ def _recompute_step_065(rows: list[dict], run_dir: pathlib.Path):
 
     # Build ref_id → trial index mapping from the original CSV
     csv_path = run_dir / "validation_trials.csv"
+    if not csv_path.exists():
+        candidates = sorted(run_dir.glob("*_validation_trials.csv"))
+        if candidates:
+            csv_path = candidates[-1]
     trial_map: list[str] = []  # parallel to rows: NPZ key per row
     with open(csv_path) as f:
         for r in _csv.DictReader(f):
@@ -84,6 +88,9 @@ def _recompute_step_065(rows: list[dict], run_dir: pathlib.Path):
         enter_idx = int(np.searchsorted(pos_x, _STEP_START_X))
         gate_indices = np.where(pos_x >= _CUTOFF_065)[0]
         if len(gate_indices) == 0 or gate_indices[0] <= enter_idx + 10:
+            # Didn't reach gate — mark as invalid so build_all_failed_freqs catches it
+            row["vx"] = 0.0
+            row["pitch_rms"] = 0.0
             continue
         gate_idx = int(gate_indices[0])
 
@@ -112,9 +119,9 @@ def _remap_exp_data(exp_data: dict) -> dict:
 # Failure modes from experimental observations
 _EXP_ONLY_FAILURES: dict[str, dict[str, list[float]]] = {
     "flat": {"scene_wheel": [50.0]},
+    "step": {"scene_wheel": [10.0, 20.0]},
 }
 _SHARED_FAILURES: dict[str, dict[str, list[float]]] = {
-    "step": {"scene_wheel": [10.0, 20.0]},
 }
 
 
@@ -199,8 +206,12 @@ def main():
     for run_dir in args.run_dirs:
         csv_path = run_dir / "validation_trials.csv"
         if not csv_path.exists():
-            print(f"WARNING: {csv_path} not found, skipping")
-            continue
+            candidates = sorted(run_dir.glob("*_validation_trials.csv"))
+            if candidates:
+                csv_path = candidates[-1]
+            else:
+                print(f"WARNING: no validation_trials.csv in {run_dir}, skipping")
+                continue
         terrain = detect_terrain(run_dir)
         rows = load_validation_csv(csv_path)
         terrain_data[terrain] = (rows, run_dir)
@@ -262,7 +273,7 @@ def main():
         rows, run_dir = terrain_data[terrain]
         if terrain == "step":
             _recompute_step_065(rows, run_dir)
-        ge = GATE_END.get(terrain)
+        ge = _CUTOFF_065 if terrain == "step" else GATE_END.get(terrain)
         exp_failures = _get_exp_failures(terrain)
         exp_all_failed = _get_exp_all_failed(terrain)
         sim_failures = _get_sim_failures(terrain)
@@ -270,7 +281,7 @@ def main():
         all_failed = build_all_failed_freqs(rows, selected_only=True, gate_end=ge)
         so = terrain.startswith("rough")  # scatter_only for rough
         isp = 0.0 if so else None  # no within-morph jitter for rough
-        sdw = 0.0 if so else None  # no inter-morph dodge for rough
+        sdw = 8.0 if so else None  # tighter cross-morph grouping for rough
 
         # Col 0: Exp velocity
         vel_ext = _VEL_EXTRACTORS.get(terrain)
@@ -279,14 +290,14 @@ def main():
             _strip_failure_freqs(exp_vel, exp_failures)
             if so:
                 _inject_na_zeros(exp_vel)
-            plot_panel(axes[i][0], exp_vel, "", "Velocity (mm/s)", exp_failures, exp_all_failed, scatter_only=so, intra_spread=isp, scatter_dodge_width=sdw, scatter_mean_line=so)
+            plot_panel(axes[i][0], exp_vel, "", "Velocity (mm/s)", exp_failures, exp_all_failed, scatter_only=so, intra_spread=isp, scatter_dodge_width=sdw, scatter_mean_line=so, )
         else:
             axes[i][0].set_visible(False)
 
         # Col 1: Sim velocity
         sim_vel = build_plot_data(rows, "vx", selected_only=True, exclude_invalid=True, gate_end=ge)
         _strip_failure_freqs(sim_vel, sim_failures)
-        plot_panel(axes[i][1], sim_vel, "", "", sim_failures, all_failed, scatter_only=so, intra_spread=isp, scatter_dodge_width=sdw, scatter_mean_line=so)
+        plot_panel(axes[i][1], sim_vel, "", "", sim_failures, all_failed, scatter_only=so, intra_spread=isp, scatter_dodge_width=sdw, scatter_mean_line=so, )
 
         # Share y-axis for velocity pair if both exist
         if vel_ext is not None:
@@ -303,7 +314,7 @@ def main():
             _strip_failure_freqs(exp_pitch, exp_failures)
             if pitch_exclude:
                 strip_freqs(exp_pitch, pitch_exclude)
-            plot_panel(axes[i][2], exp_pitch, "", "Pitch RMS (\u00b0)", exp_failures, exp_all_failed, scatter_only=so, intra_spread=isp, scatter_dodge_width=sdw, scatter_mean_line=so)
+            plot_panel(axes[i][2], exp_pitch, "", "Pitch RMS (\u00b0)", exp_failures, exp_all_failed, scatter_only=so, intra_spread=isp, scatter_dodge_width=sdw, scatter_mean_line=so, )
         else:
             # Blank cell — use for legend
             axes[i][2].axis("off")
@@ -314,7 +325,7 @@ def main():
         _strip_failure_freqs(sim_pitch, sim_failures)
         if pitch_exclude:
             strip_freqs(sim_pitch, pitch_exclude)
-        plot_panel(axes[i][3], sim_pitch, "", "", sim_failures, all_failed=all_failed, scatter_only=so, intra_spread=isp, scatter_dodge_width=sdw, scatter_mean_line=so)
+        plot_panel(axes[i][3], sim_pitch, "", "", sim_failures, all_failed=all_failed, scatter_only=so, intra_spread=isp, scatter_dodge_width=sdw, scatter_mean_line=so, )
 
         # Share y-axis for pitch pair if both exist
         if pitch_ext is not None:

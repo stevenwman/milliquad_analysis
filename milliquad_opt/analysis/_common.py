@@ -252,15 +252,18 @@ def extract_velocity(
     settle_time: float = SETTLE_TIME,
     step_start_x: float | None = None,
     step_end_x: float | None = None,
-) -> float:
+    gate_fraction: float = 0.9,
+) -> float | None:
     """Extract forward velocity from trajectory.
 
     For flat/rough: time-gated after settle_time.
-    For step: spatial-gated between step_start_x and 90% of step_end_x.
+    For step: spatial-gated between step_start_x and gate_fraction of step region.
+
+    Returns None if the trial doesn't reach the spatial gate (step terrain).
     """
     if step_start_x is not None and step_end_x is not None:
         # Spatial gating for step terrain
-        cutoff_x = step_start_x + 0.9 * (step_end_x - step_start_x)
+        cutoff_x = step_start_x + gate_fraction * (step_end_x - step_start_x)
         enter_idx = None
         exit_idx = None
         for i, s in enumerate(traj):
@@ -270,11 +273,11 @@ def extract_velocity(
                 exit_idx = i
                 break
         if enter_idx is None:
-            return 0.0
+            return None
         if exit_idx is None:
-            exit_idx = len(traj) - 1
+            return None  # didn't reach gate
         if exit_idx <= enter_idx:
-            return 0.0
+            return None
         dt = traj[exit_idx]["time"] - traj[enter_idx]["time"]
         dx = traj[exit_idx]["pos"][0] - traj[enter_idx]["pos"][0]
         return dx / dt if dt > 1e-6 else 0.0
