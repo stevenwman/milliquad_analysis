@@ -365,7 +365,7 @@ def plot_panel(
             all_freqs.update(freqs)
     all_freqs_sorted = sorted(all_freqs)
     if all_freqs_sorted:
-        pad = (scatter_dodge_width / 2 + intra_spread / 2 + 1) if scatter_only else 3
+        pad = max(scatter_dodge_width / 2 + intra_spread / 2 + 1, 3) if scatter_only else 3
         ax.set_xlim(all_freqs_sorted[0] - pad, all_freqs_sorted[-1] + pad)
         # Bracket ticks + grey gap bands (unified for all modes)
         if scatter_only:

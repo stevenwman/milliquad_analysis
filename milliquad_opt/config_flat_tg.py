@@ -180,7 +180,9 @@ def calculate_cost(
         avg_forward_velocity = forward_displacement / active_duration
 
     vel_deviation = avg_forward_velocity - target_velocity
-    if VELOCITY_DEADZONE and speed_std > 0.0 and abs(vel_deviation) <= speed_std:
+    if target_velocity == 0.0:
+        velocity_error = 0.0
+    elif VELOCITY_DEADZONE and speed_std > 0.0 and abs(vel_deviation) <= speed_std:
         velocity_error = 0.0
     elif VELOCITY_DEADZONE and speed_std > 0.0:
         excess = abs(vel_deviation) - speed_std
