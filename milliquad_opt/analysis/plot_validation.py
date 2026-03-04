@@ -50,11 +50,11 @@ def load_validation_csv(csv_path: pathlib.Path) -> list[dict]:
                 "ref_id": row["ref_id"],
                 "scene": row["scene"],
                 "freq": float(row["ctrl_freq"]),
-                "target": float(row["target_speed"]) if row["target_speed"] else None,
-                "vx": float(row["vx"]) if row["vx"] else None,
-                "cot": float(row["cot"]) if row["cot"] else None,
-                "crash": row["crash"] == "True",
-                "selected": row["selected"] == "True",
+                "target": float(row.get("target_speed", "")) if row.get("target_speed") else None,
+                "vx": float(row["vx"]) if row.get("vx") else None,
+                "cot": float(row["cot"]) if row.get("cot") else None,
+                "crash": row.get("crash", "False") == "True",
+                "selected": row.get("selected", "True") == "True",
                 "min_window_vx": float(row["min_window_vx"]) if row.get("min_window_vx") else 0.0,
                 "max_x": float(row["max_x"]) if row.get("max_x") else None,
                 "pitch_rms": float(row["pitch_rms"]) if row.get("pitch_rms") else None,
@@ -288,7 +288,7 @@ def plot_panel(
                 has_label = True
                 if n_fail > 1:
                     ax.annotate(str(n_fail), (fx, 0), textcoords="offset points",
-                                xytext=(0, 6), ha="center", va="bottom",
+                                xytext=(0, -6), ha="center", va="top",
                                 fontsize=14, fontweight="bold", color=COLORS[scene])
             # Mean line through scatter dots
             if scatter_mean_line and d["mean_freqs"]:
@@ -322,7 +322,7 @@ def plot_panel(
                             markersize=8, markeredgewidth=2, zorder=5)
                     if nf > 1:
                         ax.annotate(str(nf), (fx, 0), textcoords="offset points",
-                                    xytext=(0, 6), ha="center", va="bottom",
+                                    xytext=(0, -6), ha="center", va="top",
                                     fontsize=14, fontweight="bold", color=COLORS[scene])
 
     # X markers for target=0 failure modes (dodged by morphology)
@@ -353,7 +353,7 @@ def plot_panel(
                     )
                     if count > 1:
                         ax.annotate(str(count), (fx, 0), textcoords="offset points",
-                                    xytext=(0, 6), ha="center", va="bottom",
+                                    xytext=(0, -6), ha="center", va="top",
                                     fontsize=14, fontweight="bold", color=COLORS[scene])
 
     ax.set_xlabel("Frequency (Hz)")

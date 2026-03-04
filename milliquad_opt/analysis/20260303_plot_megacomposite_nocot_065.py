@@ -53,6 +53,18 @@ def _remap_exp_data(exp_data: dict) -> dict:
     return {_MORPH_TO_SCENE[m]: exp_data[m] for m in exp_data if m in _MORPH_TO_SCENE}
 
 
+def _build_ref_velocities(vel_extractor) -> dict[tuple[str, float], float]:
+    """Build {(scene, freq): mean_vx_mm_s} from experimental velocity extractor."""
+    if vel_extractor is None:
+        return {}
+    exp = _remap_exp_data(vel_extractor())
+    ref: dict[tuple[str, float], float] = {}
+    for scene, d in exp.items():
+        for freq, mean in zip(d["mean_freqs"], d["means"]):
+            ref[(scene, freq)] = mean
+    return ref
+
+
 # ---------------------------------------------------------------------------
 # TerrainPlotSpec: all terrain-specific rules in one place
 # ---------------------------------------------------------------------------
@@ -148,7 +160,7 @@ def _make_row(scene: str, freq: float, trial: int, *,
 
 # -- Flat: time-gate to match experimental recording lengths --
 
-_SETTLE_TIME = 0.2  # from config.py
+_SETTLE_TIME = 0.1  # must match config.SETTLE_TIME
 
 _FLAT_TRIAL_DURATION: dict[tuple[str, float], float] = {
     ("scene1", 10.0): 2.625, ("scene1", 20.0): 1.093,
@@ -158,7 +170,7 @@ _FLAT_TRIAL_DURATION: dict[tuple[str, float], float] = {
     ("scene4", 10.0): 1.245, ("scene4", 20.0): 0.712,
     ("scene4", 30.0): 0.589, ("scene4", 50.0): 0.547,
     ("scene_wheel", 10.0): 0.965, ("scene_wheel", 20.0): 0.478,
-    ("scene_wheel", 30.0): 0.384, ("scene_wheel", 50.0): 2.8,  # no exp recording; full sim window
+    ("scene_wheel", 30.0): 0.384, ("scene_wheel", 50.0): 0.316,
 }
 
 
@@ -247,6 +259,57 @@ def _recompute_step_065(rows: list[dict], run_dir: pathlib.Path) -> list[dict]:
     return new_rows
 
 
+# -- Rough: spatial gate, full terrain traversal for success --
+
+_ROUGH_START_X = 0.005
+_ROUGH_END_X = 0.155
+_ROUGH_HALF_GATE = 0.08  # half-distance gate for scene1_f10
+_ROUGH_HALF_GATE_CONDITIONS = frozenset({("scene1", 10.0)})
+
+
+def _recompute_rough(rows: list[dict], run_dir: pathlib.Path) -> list[dict]:
+    """Build rough rows from NPZ with spatial gating.
+
+    Most conditions: gate at _ROUGH_END_X (full traversal).
+    scene1_f10: gate at _ROUGH_HALF_GATE (half distance) — low pass rate at full gate.
+    """
+    d = _load_npz(run_dir)
+    if d is None:
+        print(f"WARNING: no NPZ in {run_dir}, keeping CSV rows")
+        return rows
+    new_rows = []
+    for prefix, scene, freq, trial in _npz_trial_prefixes(d):
+        try:
+            pos_x = d[f"{prefix}_pos_x"]
+            time = d[f"{prefix}_time"]
+            pitch = d[f"{prefix}_pitch"]
+        except KeyError:
+            continue
+        max_x_val = float(np.max(pos_x))
+        gate = _ROUGH_HALF_GATE if (scene, freq) in _ROUGH_HALF_GATE_CONDITIONS else _ROUGH_END_X
+        # Failure: didn't reach gate
+        if max_x_val < gate:
+            new_rows.append(_make_row(scene, freq, trial,
+                                      vx=0.0, pitch_rms=0.0, max_x=max_x_val))
+            continue
+        enter_idx = int(np.searchsorted(pos_x, _ROUGH_START_X))
+        exit_indices = np.where(pos_x >= gate)[0]
+        if len(exit_indices) == 0 or exit_indices[0] <= enter_idx + 10:
+            new_rows.append(_make_row(scene, freq, trial,
+                                      vx=0.0, pitch_rms=0.0, max_x=max_x_val))
+            continue
+        exit_idx = int(exit_indices[0])
+        dx = pos_x[exit_idx] - pos_x[enter_idx]
+        dt = time[exit_idx] - time[enter_idx]
+        vx = float(dx / dt) if dt > 1e-6 else 0.0
+        p_gate = pitch[enter_idx:exit_idx + 1]
+        pitch_rms = float(np.std(p_gate - p_gate[0])) if len(p_gate) > 1 else 0.0
+        new_rows.append(_make_row(scene, freq, trial,
+                                  vx=vx, pitch_rms=pitch_rms, max_x=max_x_val))
+    print(f"  rough: built {len(new_rows)} rows from NPZ (spatial gate)")
+    return new_rows
+
+
 # -- Trial selection: match experimental outcome pattern --
 
 _SELECT_SEED = 42
@@ -254,21 +317,22 @@ _SELECT_SEED = 42
 
 def _select_trials(rows: list[dict], n_select: int,
                    exp_failures: dict[str, list[float]],
-                   gate_end: float | None) -> list[dict]:
-    """Select n_select trials per (scene, freq), prioritizing exp failure match.
+                   gate_end: float | None,
+                   ref_velocities: dict[tuple[str, float], float] | None = None,
+                   ) -> list[dict]:
+    """Select n_select trials per (scene, freq).
 
-    For conditions where exp declares failure: pick sim failures first, fill
-    remainder randomly from passes.
-    For normal conditions: random sample.
+    Selection priority:
+    1. Exp failure conditions: pick sim failures first, fill randomly.
+    2. If ref_velocities provided: pick trials closest to exp reference speed.
+    3. Otherwise: random sample.
     """
     rng = np.random.default_rng(_SELECT_SEED)
-    # Build exp failure set for fast lookup
     fail_set: set[tuple[str, float]] = set()
     for scene, freqs in exp_failures.items():
         for f in freqs:
             fail_set.add((scene, f))
 
-    # Group rows by (scene, freq)
     from collections import defaultdict
     groups: dict[tuple[str, float], list[dict]] = defaultdict(list)
     for r in rows:
@@ -281,7 +345,6 @@ def _select_trials(rows: list[dict], n_select: int,
             continue
 
         if (scene, freq) in fail_set:
-            # Prioritize failures (vx == 0.0 means gate failure from recompute)
             fails = [t for t in trials if t["vx"] is not None and t["vx"] == 0.0]
             passes = [t for t in trials if t not in fails]
             pick = fails[:n_select]
@@ -289,8 +352,13 @@ def _select_trials(rows: list[dict], n_select: int,
                 remaining = n_select - len(pick)
                 idx = rng.choice(len(passes), size=min(remaining, len(passes)), replace=False)
                 pick.extend(passes[i] for i in idx)
+        elif ref_velocities is not None and (scene, freq) in ref_velocities:
+            # Pick trials closest to experimental reference velocity
+            ref_vx = ref_velocities[(scene, freq)]  # mm/s
+            scored = [(abs((t["vx"] or 0.0) * 1000 - ref_vx), t) for t in trials]
+            scored.sort(key=lambda x: x[0])
+            pick = [t for _, t in scored[:n_select]]
         else:
-            # Random sample
             idx = rng.choice(len(trials), size=n_select, replace=False)
             pick = [trials[i] for i in sorted(idx)]
 
@@ -312,7 +380,7 @@ TERRAIN_SPECS: dict[str, TerrainPlotSpec] = {
         exp_failures={"scene_wheel": [50.0]},
         exp_failure_counts={"scene_wheel": {50.0: 3}},
         inject_na=False, na_total_trials=0,
-        n_select=None,
+        n_select=3,
         scatter_only=False, intra_spread=None,
         scatter_dodge_width=None, scatter_mean_line=False,
     ),
@@ -333,11 +401,11 @@ TERRAIN_SPECS: dict[str, TerrainPlotSpec] = {
         name="rough", row_label="Rough",
         gate_end=0.155,
         gate_exempt=frozenset({("scene1", 10.0)}),
-        recompute=None,
+        recompute=_recompute_rough,
         vel_extractor=extract_rough, pitch_extractor=None,
         exp_failures={}, exp_failure_counts={},
         inject_na=True, na_total_trials=5,
-        n_select=None,
+        n_select=5,
         scatter_only=True, intra_spread=0.0,
         scatter_dodge_width=8.0, scatter_mean_line=True,
     ),
@@ -379,10 +447,21 @@ def _strip_failure_freqs(data: dict, failures: dict[str, list[float]]):
 
 
 def _share_ylim(ax1: plt.Axes, ax2: plt.Axes):
-    """Unify y-axis limits of two axes with bottom padding."""
+    """Unify y-axis limits with bottom padding for below-X annotations.
+
+    Annotations sit 6pt below y=0 with fontsize=14 (~14pt tall).
+    Convert that point-space offset to data coordinates so padding
+    scales correctly regardless of the panel's y-range.
+    """
     y_lo = min(ax1.get_ylim()[0], ax2.get_ylim()[0])
     y_hi = max(ax1.get_ylim()[1], ax2.get_ylim()[1])
-    y_lo = min(y_lo, -0.05 * (y_hi - y_lo))
+    fig = ax1.get_figure()
+    ax_height_pts = ax1.get_position().height * fig.get_size_inches()[1] * 72
+    # 6pt offset + 14pt font + 4pt breathing room = 24pt below y=0
+    pad_pts = 24.0
+    data_range = y_hi - y_lo if y_hi > y_lo else 1.0
+    pad_data = pad_pts / ax_height_pts * data_range
+    y_lo = min(y_lo, -pad_data)
     ax1.set_ylim(y_lo, y_hi)
     ax2.set_ylim(y_lo, y_hi)
 
@@ -421,6 +500,12 @@ def main():
     present = [t for t in _TERRAIN_ORDER if t in terrain_data]
     if not present:
         sys.exit("No validation CSVs found")
+
+    # Log exactly which run dirs are being plotted
+    print("=== Megacomposite NoCOT 065 ===")
+    for t in present:
+        rows, run_dir = terrain_data[t]
+        print(f"  {t:6s}: {run_dir}  ({len(rows)} rows)")
 
     n_rows = len(present)
 
@@ -466,10 +551,12 @@ def main():
         if spec.recompute is not None:
             rows = spec.recompute(rows, run_dir)
 
-        # Trial selection (step: 3/5, prioritize matching exp failures)
+        # Trial selection (step: 3/5, rough: 5/10 closest to exp ref)
         if spec.n_select is not None:
+            ref_vel = _build_ref_velocities(spec.vel_extractor) if spec.vel_extractor else None
             rows = _select_trials(rows, spec.n_select,
-                                  spec.exp_failures, spec.gate_end)
+                                  spec.exp_failures, spec.gate_end,
+                                  ref_velocities=ref_vel)
 
         # Sim failures: always dynamic, never hardcoded
         all_failed = build_all_failed_freqs(
@@ -530,9 +617,11 @@ def main():
         plot_panel(axes[i][3], sim_pitch, "", "",
                    None, all_failed, **disp)
 
-        # Share y-axis for pitch pair
+        # Share y-axis for pitch pair (or just pad sim panel if no exp)
         if spec.pitch_extractor is not None:
             _share_ylim(axes[i][2], axes[i][3])
+        else:
+            _share_ylim(axes[i][3], axes[i][3])
 
     # --- Post-hoc axis cleanup ---
     from matplotlib.collections import PathCollection
@@ -613,7 +702,9 @@ def main():
         fig.legend(handles, labels, loc="lower center", ncol=4,
                    fontsize=7, framealpha=0.9)
 
-    out = args.output or "plots/20260303_megacomposite_nocot_065.png"
+    from datetime import datetime
+    ts = datetime.now().strftime("%Y%m%dT%H%M%S")
+    out = args.output or f"plots/{ts}_megacomposite_nocot_065.png"
     fig.savefig(out, dpi=200, bbox_inches="tight")
     print(f"Saved: {out}")
 
