@@ -89,12 +89,15 @@ def _store_trajectory_arrays(
         traj_arrays[f"{traj_key}_drive_angle"] = np.array(
             [s["drive_angle"] for s in traj], dtype=f32)
 
-    # External torques (for power/COT recomputation)
+    # External torques + angular velocity (for power/COT recomputation)
     if "tau_ext" in traj[0]:
         traj_arrays[f"{traj_key}_tau_ext"] = np.array(
             [s["tau_ext"] for s in traj], dtype=f32)  # (T, 4, 3)
+    if "omega" in traj[0]:
+        traj_arrays[f"{traj_key}_omega"] = np.array(
+            [s["omega"] for s in traj], dtype=f32)  # (T, 4, 3)
 
-    # Energy fields (for COT recomputation with corrected axis-projection formula)
+    # Energy fields (leg_xquat, joint_vel, leg_xpos — kept for axis-projection if needed)
     if "leg_xquat" in traj[0]:
         traj_arrays[f"{traj_key}_leg_xquat"] = np.array(
             [s["leg_xquat"] for s in traj], dtype=f32)  # (T, 4, 4)
@@ -619,7 +622,8 @@ def main():
     # --- Trajectory overview plot ---
     if args.csv and traj_arrays:
         from analysis.plot_trajectories import plot_trajectory_overview
-        plot_trajectory_overview(args.run_dir, step_start_x, step_end_x)
+        plot_trajectory_overview(args.run_dir, step_start_x, step_end_x,
+                                npz_path=npz_path, csv_path=csv_path)
 
 
 if __name__ == "__main__":

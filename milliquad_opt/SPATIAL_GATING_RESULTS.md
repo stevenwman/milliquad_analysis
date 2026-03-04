@@ -296,4 +296,4 @@ Post-hoc re-windowing from NPZ (as in `plot_megacomposite_nocot_065.py`) changes
 | `config_step.py` | Original step config (90% gate) — **unchanged** |
 | `config_step_065.py` | Copy with 65% gate for retraining |
 | `analysis/plot_megacomposite_nocot_065.py` | Nocot megacomposite with 65% re-windowed metrics |
-| `analysis/temp/plot_pitch_mega.py` | Per-condition pitch time series (uses 65% gate, 100% trim) |
+| `analysis/investigative/plot_pitch_mega.py` | Per-condition pitch time series (uses 65% gate, 100% trim) |

@@ -221,6 +221,9 @@ def plot_panel(
     failures: dict[str, list[float]] | None = None,
     all_failed: dict[str, dict[float, int]] | None = None,
     scatter_only: bool = False,
+    intra_spread: float | None = None,
+    scatter_dodge_width: float | None = None,
+    scatter_mean_line: bool = False,
 ):
     """Plot one terrain panel with shaded std bands and scatter dots.
 
@@ -232,8 +235,10 @@ def plot_panel(
     """
     n = len(PLOT_ORDER)
     dodge_width = 3.5  # total spread in Hz (non-scatter mode)
-    scatter_dodge_width = 15.0  # wider spread for scatter_only (freq ticks 20 Hz apart)
-    intra_spread = 3.0  # Hz, spread within one morphology's slot (scatter_only)
+    if scatter_dodge_width is None:
+        scatter_dodge_width = 15.0  # wider spread for scatter_only (freq ticks 20 Hz apart)
+    if intra_spread is None:
+        intra_spread = 3.0  # Hz, spread within one morphology's slot (scatter_only)
     # morphology gap = 15/3 = 5 Hz; clearance = 5 - 3 = 2 Hz
     for idx, scene in enumerate(PLOT_ORDER):
         d = data[scene]
@@ -279,6 +284,14 @@ def plot_panel(
                     ax.annotate(str(n_fail), (fx, 0), textcoords="offset points",
                                 xytext=(0, 6), ha="center", va="bottom",
                                 fontsize=14, fontweight="bold", color=COLORS[scene])
+            # Mean line through scatter dots
+            if scatter_mean_line and d["mean_freqs"]:
+                mf = np.array(d["mean_freqs"]) + dx
+                mm = np.array(d["means"])
+                valid_m = mm > 0
+                if valid_m.any():
+                    ax.plot(mf[valid_m], mm[valid_m], color=COLORS[scene],
+                            linewidth=1.2, alpha=0.7, zorder=4)
         else:
             freq_arr = np.array(d["mean_freqs"]) + dx
             mean = np.array(d["means"])

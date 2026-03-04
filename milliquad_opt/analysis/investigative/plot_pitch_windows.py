@@ -9,7 +9,7 @@ Right panel: pos_x (mm) vs time
 Shading + lines mark the window boundaries.
 
 Usage:
-    uv run python -m analysis.temp.plot_pitch_windows
+    uv run python -m analysis.investigative.plot_pitch_windows
 """
 
 import csv

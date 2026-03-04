@@ -31,10 +31,12 @@ def plot_trajectory_overview(
     run_dir: Path,
     step_start_x: float | None = None,
     step_end_x: float | None = None,
+    npz_path: Path | None = None,
+    csv_path: Path | None = None,
 ) -> Path:
     """Generate trajectory overview plot. Returns output path."""
-    npz_path = run_dir / "validation_trajectories.npz"
-    csv_path = run_dir / "validation_trials.csv"
+    npz_path = npz_path or run_dir / "validation_trajectories.npz"
+    csv_path = csv_path or run_dir / "validation_trials.csv"
     out_path = run_dir / "trajectory_overview.png"
 
     traj = np.load(npz_path)

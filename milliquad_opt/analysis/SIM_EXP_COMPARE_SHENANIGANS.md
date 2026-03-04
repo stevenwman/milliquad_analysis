@@ -183,7 +183,7 @@ All X markers (failure modes, all-invalid combos) now receive morphology-based h
 
 ## Pitch Mega Figure: Sim vs Exp Gating Mismatch
 
-`analysis/temp/plot_pitch_mega.py` produces per-condition pitch time series and XY paths for step terrain. Sim and exp use **different windowing methods** for pitch RMS — this is intentional, not a bug.
+`analysis/investigative/plot_pitch_mega.py` produces per-condition pitch time series and XY paths for step terrain. Sim and exp use **different windowing methods** for pitch RMS — this is intentional, not a bug.
 
 ### Sim pitch RMS: spatial gating
 - Window: `STEP_START_X` (50mm) to `CUTOFF_X` (65% of step region = 83.5mm)

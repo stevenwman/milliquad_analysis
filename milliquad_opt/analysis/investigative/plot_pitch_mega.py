@@ -6,7 +6,7 @@ Exp shows q60 index window [0.45n : 0.75n].
 Y-axis matched across sim/exp per row.
 
 Usage:
-    uv run python -m analysis.temp.plot_pitch_mega
+    uv run python -m analysis.investigative.plot_pitch_mega
 """
 
 import csv
