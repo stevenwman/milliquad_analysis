@@ -63,13 +63,17 @@ def load_validation_csv(csv_path: pathlib.Path) -> list[dict]:
     return rows
 
 
-def _is_valid_trial(r: dict, gate_end: float | None = None) -> bool:
+def _is_valid_trial(r: dict, gate_end: float | None = None,
+                    gate_exempt: frozenset[tuple[str, float]] | None = None) -> bool:
     """A trial is valid if it cleared the gate (rough/step) AND isn't inverted.
 
     gate_end: required x position for rough/step terrain (None for flat = always passes).
+    gate_exempt: (scene, freq) pairs exempt from gate check. Falls back to module-level
+        GATE_EXEMPT if not provided.
     """
+    exempt = gate_exempt if gate_exempt is not None else GATE_EXEMPT
     if gate_end is not None and r["max_x"] is not None:
-        if (r["scene"], r["freq"]) not in GATE_EXEMPT and r["max_x"] < gate_end:
+        if (r["scene"], r["freq"]) not in exempt and r["max_x"] < gate_end:
             return False
     inverted = r["pitch_rms"] is not None and r["pitch_rms"] > INVERTED_PITCH_THRESHOLD
     return not inverted
@@ -80,7 +84,8 @@ def build_plot_data(rows: list[dict], metric: str,
                     selected_only: bool = False,
                     exclude_stalled: bool = False,
                     exclude_invalid: bool = False,
-                    gate_end: float | None = None) -> dict:
+                    gate_end: float | None = None,
+                    gate_exempt: frozenset[tuple[str, float]] | None = None) -> dict:
     """Group trials by scene.
 
     Returns {scene: {freqs, trials, mean_freqs, means, stds}}.
@@ -117,7 +122,7 @@ def build_plot_data(rows: list[dict], metric: str,
             freq_vals_valid = []
             
             for r in freq_rows:
-                is_valid = _is_valid_trial(r, gate_end)
+                is_valid = _is_valid_trial(r, gate_end, gate_exempt)
                 if exclude_invalid and not is_valid:
                     # Plot as failure (X marker at 0.0) but don't include in means
                     trial_freqs.append(freq)
@@ -183,7 +188,8 @@ def strip_freqs(data: dict, freqs_to_remove: list[float]):
 
 def build_all_failed_freqs(rows: list[dict],
                            selected_only: bool = False,
-                           gate_end: float | None = None) -> dict[str, dict[float, int]]:
+                           gate_end: float | None = None,
+                           gate_exempt: frozenset[tuple[str, float]] | None = None) -> dict[str, dict[float, int]]:
     """Find (scene, freq) combos where ALL trials are invalid (didn't clear gate or inverted).
 
     Returns {scene: {freq: count}} for use as X markers with counts on plots.
@@ -198,7 +204,7 @@ def build_all_failed_freqs(rows: list[dict],
         freqs = sorted(set(r["freq"] for r in scene_rows))
         for freq in freqs:
             freq_rows = [r for r in scene_rows if r["freq"] == freq]
-            if freq_rows and all(not _is_valid_trial(r, gate_end) for r in freq_rows):
+            if freq_rows and all(not _is_valid_trial(r, gate_end, gate_exempt) for r in freq_rows):
                 failed.setdefault(scene, {})[freq] = len(freq_rows)
     return failed
 
