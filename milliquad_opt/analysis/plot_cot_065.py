@@ -410,8 +410,8 @@ TERRAIN_SPECS: dict[str, CotTerrainSpec] = {
         exp_failures={},
         sim_strip={},
         n_select=5,
-        scatter_only=True, intra_spread=0.0,
-        scatter_dodge_width=8.0, scatter_mean_line=True,
+        scatter_only=False, intra_spread=None,
+        scatter_dodge_width=None, scatter_mean_line=False,
     ),
 }
 

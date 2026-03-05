@@ -264,3 +264,67 @@ Units: velocity in mm/s, pitch in degrees, COT dimensionless.
 | scene4 | 20 | 3 | 3.80 | 0.97 |
 | scene4 | 30 | 3 | 4.89 | 0.67 |
 | scene_wheel | 30 | 3 | 3.58 | 0.17 |
+
+---
+
+# Sim vs Exp Velocity Error (nocot_065 pipeline, 2026-03-04)
+
+Computed using the same pipeline as `plot_megacomposite_nocot_065.py`:
+- **Trial selection**: 3 per condition, closest to experimental reference velocity
+- **Flat gating**: time-gated to match experimental recording duration per condition
+- **Step gating**: 65% spatial gate (measurement from 0.05m to 0.0835m), success = full traversal to 0.1015m
+
+Run dirs:
+- Flat: `results/20260303T192801_flat_tg`
+- Step: `results/20260303T151416_step_065gate`
+
+Exp sources: `extract_flat()`, `extract_step_q60()` from `experimental_data/plot_velocity_vs_freq.py`
+
+## Flat Velocity Error (3 selected trials)
+
+| Condition | Exp (mm/s) | Sim mean | Sim std | % Error |
+|-----------|-----------|----------|---------|---------|
+| L1 f10 | 51.2 | 57.9 | 0.1 | 13.1% |
+| L1 f20 | 126.5 | 106.2 | 1.2 | 16.0% |
+| L1 f30 | 118.8 | 118.9 | 2.4 | 0.1% |
+| L1 f50 | 148.3 | 147.3 | 4.3 | 0.7% |
+| L2 f10 | 82.4 | 89.4 | 2.2 | 8.5% |
+| L2 f20 | 135.6 | 132.4 | 3.0 | 2.4% |
+| L2 f30 | 179.6 | 177.2 | 4.5 | 1.3% |
+| L2 f50 | 249.6 | 248.4 | 1.6 | 0.5% |
+| L4 f10 | 112.1 | 102.9 | 1.3 | 8.2% |
+| L4 f20 | 184.1 | 172.1 | 2.1 | 6.5% |
+| L4 f30 | 274.4 | 285.4 | 3.2 | 4.0% |
+| L4 f50 | 328.0 | 331.9 | 11.9 | 1.2% |
+| WR f10 | 143.1 | 159.4 | 0.6 | 11.4% |
+| WR f20 | 305.8 | 294.5 | 2.6 | 3.7% |
+| WR f30 | 450.3 | 389.6 | 2.5 | 13.5% |
+| WR f50 | 709.4 | 350.1 | 19.2 | 50.6% |
+
+| Subset | Mean % Error | Median % Error | N |
+|--------|-------------|----------------|---|
+| All 16 conditions | 8.9% | 5.2% | 16 |
+| Excl. WR f50 (exp failure) | 6.1% | 4.0% | 15 |
+
+WR f50 is an experimental failure mode (robot self-destructs at 50Hz). Sim doesn't model mechanical failure, so 50.6% error is expected. Shown as X marker on exp panel in nocot plot.
+
+## Step Velocity Error (3 selected trials, gate-passing only)
+
+| Condition | Exp (mm/s) | Sim mean | Sim std | % Error | Pass/Total |
+|-----------|-----------|----------|---------|---------|------------|
+| L1 f10 | 16.9 | 18.3 | 0.4 | 8.7% | 3/3 |
+| L1 f20 | 46.2 | 44.6 | 1.1 | 3.5% | 3/3 |
+| L1 f30 | 27.9 | 33.2 | 6.2 | 19.1% | 3/3 |
+| L2 f10 | 41.5 | 61.9 | 0.4 | 49.0% | 3/3 |
+| L2 f20 | 83.5 | 82.8 | 3.6 | 0.9% | 3/3 |
+| L2 f30 | 109.8 | 108.8 | 0.8 | 0.9% | 3/3 |
+| L4 f10 | 76.9 | 74.4 | 9.2 | 3.4% | 3/3 |
+| L4 f20 | 96.3 | 97.1 | 1.5 | 0.8% | 3/3 |
+| L4 f30 | 76.4 | 75.4 | 18.5 | 1.3% | 3/3 |
+| WR f30 | 97.2 | 67.4 | 22.5 | 30.7% | 3/3 |
+
+| Subset | Mean % Error | Median % Error | N |
+|--------|-------------|----------------|---|
+| All 10 conditions | 11.8% | 3.4% | 10 |
+
+WR f10/f20 excluded (experimental failure — wheel can't move on steps at low freq). L2 f10 (49%) and WR f30 (31%) are the main outliers.
