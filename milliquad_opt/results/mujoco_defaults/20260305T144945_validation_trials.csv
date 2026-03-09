@@ -1,0 +1,11 @@
+ref_id,scene,ctrl_freq,target_speed,trial,rng_seed,jitter_type,jitter_value,crash,selected
+scene2_f20,scene2,20.0,0.1131,0,99999,yaw_deg,0.7732333079395692,False,True
+scene2_f20,scene2,20.0,0.1131,1,100000,yaw_deg,-1.4962610163174745,False,True
+scene2_f20,scene2,20.0,0.1131,2,100001,yaw_deg,1.4074009772794827,False,True
+scene2_f20,scene2,20.0,0.1131,3,100002,yaw_deg,1.7762258831491096,False,True
+scene2_f20,scene2,20.0,0.1131,4,100003,yaw_deg,-1.9085934959966302,False,True
+scene2_f20,scene2,20.0,0.1131,5,100004,yaw_deg,-1.9192277316715898,False,True
+scene2_f20,scene2,20.0,0.1131,6,100005,yaw_deg,0.011243208044545039,False,True
+scene2_f20,scene2,20.0,0.1131,7,100006,yaw_deg,0.5261845386562705,False,True
+scene2_f20,scene2,20.0,0.1131,8,100007,yaw_deg,-1.05560789041466,False,True
+scene2_f20,scene2,20.0,0.1131,9,100008,yaw_deg,1.9014781154054217,False,True

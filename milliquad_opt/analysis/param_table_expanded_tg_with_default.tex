@@ -1,0 +1,43 @@
+% Expanded version of param_table.tex with description column and MuJoCo defaults
+% Optimized contact parameters: flat_tg (20260303T192801), step_065 (20260303T151416), rough_tg (20260303T224229)
+% Red = outlier (>1σ from mean across 3 terrains; log-scale for params spanning orders of magnitude)
+% Requires: \usepackage{siunitx, xcolor, booktabs}
+% Usage: \input{param_table_expanded_tg_with_default.tex}
+
+\begin{table*}[ht]
+\centering
+\caption{Optimized contact parameters for each terrain. \textcolor{red}{Red} highlights outliers ($>1\sigma$ from mean across terrains).}
+\label{tab:params_expanded_tg_default}
+\footnotesize
+\sisetup{}
+\begin{tabular}{lccccp{5.5cm}}
+\toprule
+Parameter & Default & Flat & Step & Rough & Higher means: \\
+\midrule
+\texttt{friction} (sliding)          & \num{1.0}       & \textcolor{red}{\num{0.493}}     & \num{0.734}     & \num{0.640}     & more lateral sliding resistance \\
+\texttt{friction} (torsional)        & \num{5.0e-3}    & \num{6.11e-4}   & \num{2.72e-4}   & \textcolor{red}{\num{2.35e-5}}   & more spin resistance at contact \\
+\texttt{friction} (rolling)          & \num{1.0e-4}    & \num{1.11e-6}   & \textcolor{red}{\num{2.09e-6}}   & \num{1.48e-6}   & more rolling resistance at contact \\
+\texttt{solref} (timeconst)          & \num{0.02}      & \num{1.32e-3}   & \textcolor{red}{\num{2.42e-3}}   & \num{8.33e-4}   & softer, slower constraint stabilization \\
+\texttt{solref} (dampratio)          & \num{1.0}       & \num{2.74}       & \textcolor{red}{\num{1.53}}       & \num{3.67}       & more damped contact; $<$1 underdamped \\
+\texttt{solimp} (dmin)               & \num{0.9}       & \textcolor{red}{\num{0.756}}      & \num{0.312}      & \num{0.282}      & higher stiffness on initial touch \\
+\texttt{solimp} (dmax)               & \num{0.95}      & \num{0.927}      & \num{0.850}      & \textcolor{red}{\num{0.508}}      & higher stiffness under deep penetration \\
+\texttt{solimp} (width)              & \num{1.0e-3}    & \textcolor{red}{\num{2.26e-5}}   & \num{1.53e-5}   & \num{1.58e-5}   & more gradual stiffness ramp-up \\
+\texttt{solimp} (midpoint)           & \num{0.5}       & \textcolor{red}{\num{0.697}}      & \num{0.925}      & \num{0.814}      & full stiffness at shallower penetration \\
+\texttt{solimp} (power)              & \num{2.0}       & \num{4.93}       & \num{4.85}       & \textcolor{red}{\num{5.43}}       & more abrupt dmin$\to$dmax transition \\
+\texttt{moment\_fudge}$^*$           & \num{1.0}       & \textcolor{red}{\num{0.522}}      & \num{0.907}      & \num{0.853}       & stronger magnet response to field \\
+\texttt{field\_fudge}$^*$            & \num{1.0}       & \num{1.49}       & \textcolor{red}{\num{0.802}}      & \num{1.50}       & stronger external drive field \\
+\texttt{damping}                     & \num{0}         & \num{3.60e-10}   & \num{2.98e-10}   & \textcolor{red}{\num{7.65e-10}}   & more viscous joint resistance \\
+\texttt{noslip\_iterations}          & \num{0}         & \num{1}          & \textcolor{red}{\num{30}}         & \num{0}          & more no-slip friction enforcement; 0 disables \\
+\texttt{noslip\_tolerance}           & \num{1.0e-6}    & \num{7.57e-6}   & \num{1.99e-5}   & \textcolor{red}{\num{1.01e-6}}  & more residual slip allowed \\
+\texttt{o\_margin}                   & \num{0}         & \num{3.03e-4}   & \num{5.74e-4}   & \textcolor{red}{\num{3.00e-5}}   & larger contact detection distance \\
+\hline
+$w_{\text{vel}}$                     &          & \num{5}          & \num{5}          & \num{5}          & weight on velocity error in Eq.~(11) \\
+$w_{\text{tum}}$                     &          & \num{1}          & \num{1}          & \num{2}          & weight on tumble penalty \\
+$w_{\text{lat}}$                     &          & \num{5}          & \num{1}          & \num{5}          & weight on lateral deviation \\
+$w_{\text{var}}$                     &          & \num{2}          & \num{2}          & \num{2}          & weight on cross-ref velocity variance \\
+$w_{\text{prog}}$                    &          & \num{0}          & \num{2}          & \num{0}          & weight on step traversal progress \\
+$w_{\text{yaw}}$                     &          & \num{1}          & \num{0}          & \num{1}          & weight on yaw penalty \\
+\bottomrule
+\multicolumn{6}{l}{\scriptsize $^*$Custom scaling factors, not MuJoCo parameters; default = no scaling.}
+\end{tabular}
+\end{table*}

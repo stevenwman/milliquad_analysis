@@ -1,0 +1,2 @@
+timestamp,elapsed_min,n_eval,id,cost,sliding_friction,torsional_friction,rolling_friction,solref_timeconst,solref_dampratio,solimp_dmin,solimp_delta_d,solimp_width,solimp_midpoint,solimp_power,magnetic_moment_fudge,magnetic_field_fudge,dof_damping,noslip_iterations,noslip_tolerance,margin
+2026-03-05T00:00:00,0.0,0,mujoco_defaults,0.0,1.0,0.005,0.0001,0.02,1.0,0.9,0.5005005005005005,0.001,0.5,2.0,1.0,1.0,0.0,0,1e-6,0.0
