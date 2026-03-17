@@ -1,4 +1,0 @@
-config,scene,freq_hz,vel_m_s,vel_std_m_s,vel_mean_m_s,flat_vel_m_s,ratio,tumble,lateral_m,yaw_deg,n_valid,n_total
-scene_wheel_f10,scene_wheel,10.0,0.024675,0.000000,0.024675,0.142484,0.1732,N,0.000495,0.97,1,1
-scene_wheel_f20,scene_wheel,20.0,0.020764,0.000000,0.020764,0.305146,0.0680,N,0.001857,5.18,1,1
-scene_wheel_f30,scene_wheel,30.0,0.016945,0.000000,0.016945,0.444946,0.0381,N,0.005691,0.97,1,1
