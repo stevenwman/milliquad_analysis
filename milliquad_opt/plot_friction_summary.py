@@ -18,11 +18,17 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-# Baseline values (from rough_tg optimization_bests.csv final row)
-BASELINE = {
-    "sliding_friction": 0.640039,
-    "torsional_friction": 2.35e-05,
-    "rolling_friction": 1.48e-06,
+_BASELINES = {
+    "rough": {
+        "sliding_friction": 0.640039,
+        "torsional_friction": 2.35e-05,
+        "rolling_friction": 1.48e-06,
+    },
+    "flat": {
+        "sliding_friction": 0.492594,
+        "torsional_friction": 6.11e-04,
+        "rolling_friction": 1.11e-06,
+    },
 }
 
 PARAM_ORDER = ["sliding_friction", "torsional_friction", "rolling_friction"]
@@ -39,6 +45,14 @@ def main():
 
     results_dir = Path(sys.argv[1])
     summary_csv = results_dir / "friction_sweep_summary.csv"
+
+    # Detect terrain and set baseline
+    global BASELINE
+    dirname = results_dir.name
+    is_flat = "flat" in dirname
+    terrain_key = "flat" if is_flat else "rough"
+    terrain_label = "flat terrain" if is_flat else "rough terrain"
+    BASELINE = _BASELINES[terrain_key]
 
     with open(summary_csv) as f:
         rows = list(csv.DictReader(f))
@@ -67,15 +81,16 @@ def main():
         "font.size": 9,
     })
 
+    nrows = 1 if is_flat else 2
     fig, axes = plt.subplots(
-        2, 3,
-        figsize=(12, 5.5),
+        nrows, 3,
+        figsize=(12, 3.5 if is_flat else 5.5),
         constrained_layout=True,
+        squeeze=False,
     )
 
     for ci, (pname, plabel) in enumerate(zip(PARAM_ORDER, PARAM_LABELS)):
-        ax_sr = axes[0, ci]  # success rate
-        ax_vx = axes[1, ci]  # velocity
+        ax_vx = axes[-1, ci]
 
         for freq in sorted(FREQ_COLORS.keys()):
             if freq not in data[pname]:
@@ -90,9 +105,11 @@ def main():
             marker = FREQ_MARKERS[freq]
             label = f"{int(freq)} Hz"
 
-            ax_sr.plot(vals, sr, color=color, marker=marker, ms=5, lw=1.5, label=label)
+            if not is_flat:
+                ax_sr = axes[0, ci]
+                ax_sr.plot(vals, sr, color=color, marker=marker, ms=5, lw=1.5, label=label)
+
             ax_vx.plot(vals, vx, color=color, marker=marker, ms=5, lw=1.5, label=label)
-            # Shade std (only where there are successes)
             vx_arr = np.array(vx)
             std_arr = np.array(vx_std)
             mask = vx_arr > 0
@@ -105,30 +122,31 @@ def main():
                     color=color, alpha=0.15,
                 )
 
-        # Baseline vertical line
-        bl = BASELINE[pname]
-        ax_sr.axvline(bl, color="k", ls="--", lw=1.0, alpha=0.6, zorder=0,
-                      label="Baseline" if ci == 0 else None)
+        bl = BASELINE.get(pname, 0)
         ax_vx.axvline(bl, color="k", ls="--", lw=1.0, alpha=0.6, zorder=0)
-
-        ax_sr.set_xscale("log")
         ax_vx.set_xscale("log")
-
-        ax_sr.set_ylim(-5, 105)
-        ax_sr.set_ylabel("Success rate (%)" if ci == 0 else "")
         ax_vx.set_ylabel("Mean velocity (mm/s)" if ci == 0 else "")
         ax_vx.set_xlabel(plabel)
-
-        ax_sr.set_title(plabel, fontsize=11, fontweight="bold")
-
-        if ci == 0:
-            ax_sr.legend(fontsize=8, loc="lower left")
-
-        ax_sr.grid(axis="y", alpha=0.3)
         ax_vx.grid(axis="y", alpha=0.3)
 
+        if not is_flat:
+            ax_sr = axes[0, ci]
+            ax_sr.axvline(bl, color="k", ls="--", lw=1.0, alpha=0.6, zorder=0,
+                          label="Baseline" if ci == 0 else None)
+            ax_sr.set_xscale("log")
+            ax_sr.set_ylim(-5, 105)
+            ax_sr.set_ylabel("Success rate (%)" if ci == 0 else "")
+            ax_sr.set_title(plabel, fontsize=11, fontweight="bold")
+            if ci == 0:
+                ax_sr.legend(fontsize=8, loc="lower left")
+            ax_sr.grid(axis="y", alpha=0.3)
+        else:
+            ax_vx.set_title(plabel, fontsize=11, fontweight="bold")
+            if ci == 0:
+                ax_vx.legend(fontsize=8, loc="lower left")
+
     fig.suptitle(
-        "Friction sensitivity — L2 (scene2) on rough terrain",
+        f"Friction sensitivity — L2 (scene2) on {terrain_label}",
         fontsize=13, fontweight="bold",
     )
 
