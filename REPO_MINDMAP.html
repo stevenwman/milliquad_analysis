@@ -1,0 +1,783 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LEGO Milliquad MuJoCo — Repo Mind Map</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --surface: #1a2332;
+      --surface2: #243044;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --accent: #58a6ff;
+      --core: #3fb950;
+      --config: #d29922;
+      --robot: #a371f7;
+      --analysis: #f778ba;
+      --data: #79c0ff;
+      --docs: #8b949e;
+      --wip: #f85149;
+      --ready: #3fb950;
+      --border: #30363d;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+      min-height: 100vh;
+    }
+
+    header {
+      padding: 2rem 2rem 1rem;
+      border-bottom: 1px solid var(--border);
+      background: linear-gradient(180deg, #161b22 0%, var(--bg) 100%);
+    }
+
+    header h1 { font-size: 1.75rem; font-weight: 600; margin-bottom: 0.35rem; }
+    header p { color: var(--muted); max-width: 72ch; font-size: 0.95rem; }
+
+    .meta {
+      display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 1rem;
+    }
+
+    .pill {
+      font-size: 0.75rem; padding: 0.2rem 0.65rem; border-radius: 999px;
+      border: 1px solid var(--border); background: var(--surface);
+    }
+
+    .pill.branch { border-color: var(--accent); color: var(--accent); }
+
+    main { padding: 1.5rem 2rem 3rem; max-width: 1400px; margin: 0 auto; }
+
+    .legend {
+      display: flex; flex-wrap: wrap; gap: 0.75rem; margin-bottom: 1.5rem;
+      padding: 1rem; background: var(--surface); border-radius: 8px; border: 1px solid var(--border);
+    }
+
+    .legend-item { display: flex; align-items: center; gap: 0.4rem; font-size: 0.8rem; color: var(--muted); }
+    .dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+
+    .controls {
+      display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1.5rem;
+    }
+
+    button {
+      background: var(--surface2); color: var(--text); border: 1px solid var(--border);
+      padding: 0.4rem 0.85rem; border-radius: 6px; cursor: pointer; font-size: 0.85rem;
+    }
+    button:hover { background: var(--surface); border-color: var(--accent); }
+
+    /* Mind map tree */
+    .mindmap {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.5rem;
+      overflow-x: auto;
+    }
+
+    .tree ul {
+      list-style: none;
+      padding-left: 1.25rem;
+      position: relative;
+    }
+
+    .tree > ul { padding-left: 0; }
+
+    .tree li {
+      position: relative;
+      padding: 0.15rem 0 0.15rem 0;
+    }
+
+    .tree li::before {
+      content: "";
+      position: absolute;
+      left: -0.75rem;
+      top: 1.1rem;
+      width: 0.75rem;
+      height: 1px;
+      background: var(--border);
+    }
+
+    .tree li::after {
+      content: "";
+      position: absolute;
+      left: -0.75rem;
+      top: 0;
+      bottom: 0;
+      width: 1px;
+      background: var(--border);
+    }
+
+    .tree > ul > li::after { top: 1.1rem; }
+    .tree li:last-child::after { height: 1.1rem; }
+
+    .node {
+      display: inline-flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.35rem 0.65rem;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--surface2);
+      font-size: 0.875rem;
+      cursor: pointer;
+      user-select: none;
+      max-width: 100%;
+    }
+
+    .node:hover { border-color: var(--accent); }
+
+    .node.root {
+      font-size: 1.1rem;
+      font-weight: 600;
+      background: linear-gradient(135deg, #1f3a5f, #1a2332);
+      border-color: var(--accent);
+      padding: 0.6rem 1rem;
+    }
+
+    .node.layer-core { border-left: 3px solid var(--core); }
+    .node.layer-config { border-left: 3px solid var(--config); }
+    .node.layer-robot { border-left: 3px solid var(--robot); }
+    .node.layer-analysis { border-left: 3px solid var(--analysis); }
+    .node.layer-data { border-left: 3px solid var(--data); }
+    .node.layer-docs { border-left: 3px solid var(--docs); }
+    .node.layer-infra { border-left: 3px solid var(--accent); }
+    .node.layer-wip { border-left: 3px solid var(--wip); }
+
+    .badge {
+      font-size: 0.65rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      padding: 0.1rem 0.4rem;
+      border-radius: 4px;
+    }
+
+    .badge.ready { background: rgba(63,185,80,0.2); color: var(--ready); }
+    .badge.wip { background: rgba(248,81,73,0.2); color: var(--wip); }
+    .badge.archive { background: rgba(139,148,158,0.2); color: var(--muted); }
+    .badge.canonical { background: rgba(121,192,255,0.2); color: var(--data); }
+
+    .desc {
+      display: block;
+      width: 100%;
+      font-size: 0.78rem;
+      color: var(--muted);
+      font-weight: 400;
+      margin-top: 0.15rem;
+      padding-left: 0;
+    }
+
+    .collapsed > ul { display: none; }
+    .toggle::before { content: "▾ "; color: var(--muted); font-size: 0.7rem; }
+    .collapsed > .node .toggle::before { content: "▸ "; }
+
+    /* Sections below map */
+    section.block {
+      margin-top: 2rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.25rem 1.5rem;
+    }
+
+    section.block h2 {
+      font-size: 1.1rem;
+      margin-bottom: 1rem;
+      color: var(--accent);
+    }
+
+    .flow {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.85rem;
+      margin-bottom: 1rem;
+    }
+
+    .flow-box {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      padding: 0.5rem 0.75rem;
+      border-radius: 6px;
+    }
+
+    .flow-arrow { color: var(--muted); }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.85rem;
+    }
+
+    th, td {
+      text-align: left;
+      padding: 0.5rem 0.75rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    th { color: var(--muted); font-weight: 500; }
+
+    code {
+      font-family: "SF Mono", Consolas, monospace;
+      font-size: 0.8em;
+      background: var(--bg);
+      padding: 0.1rem 0.35rem;
+      border-radius: 4px;
+    }
+
+    .questions li {
+      margin-bottom: 0.75rem;
+      padding-left: 1rem;
+      border-left: 2px solid var(--wip);
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    .questions strong { color: var(--text); }
+
+    .cmd-block {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem;
+      font-family: "SF Mono", Consolas, monospace;
+      font-size: 0.78rem;
+      overflow-x: auto;
+      white-space: pre;
+      color: #c9d1d9;
+      margin-top: 0.5rem;
+    }
+
+    @media (max-width: 700px) {
+      header, main { padding-left: 1rem; padding-right: 1rem; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>LEGO Milliquad MuJoCo — Repo Mind Map</h1>
+    <p>
+      Interactive map of components and layers for organizing a code release.
+      Miniature magnetically-actuated quadruped (~6 mm) simulated in MuJoCo;
+      CMA-ES tunes 16 physics params to match reference locomotion data.
+    </p>
+    <div class="meta">
+      <span class="pill branch">branch: final</span>
+      <span class="pill">package: milliquad-analysis v0.1.0</span>
+      <span class="pill">Python ≥ 3.12 · uv</span>
+      <span class="pill">generated: 2026-06-12</span>
+    </div>
+  </header>
+
+  <main>
+    <div class="legend">
+      <div class="legend-item"><span class="dot" style="background:var(--core)"></span> Core engine</div>
+      <div class="legend-item"><span class="dot" style="background:var(--config)"></span> Config / cost</div>
+      <div class="legend-item"><span class="dot" style="background:var(--robot)"></span> Robot models</div>
+      <div class="legend-item"><span class="dot" style="background:var(--analysis)"></span> Analysis / plots</div>
+      <div class="legend-item"><span class="dot" style="background:var(--data)"></span> Results / data</div>
+      <div class="legend-item"><span class="dot" style="background:var(--docs)"></span> Docs / plans</div>
+      <div class="legend-item"><span class="dot" style="background:var(--accent)"></span> Infra</div>
+      <div class="legend-item"><span class="badge ready">ready</span> release candidate</div>
+      <div class="legend-item"><span class="badge wip">wip</span> experimental / cleanup</div>
+    </div>
+
+    <div class="controls">
+      <button onclick="expandAll()">Expand all</button>
+      <button onclick="collapseAll()">Collapse all</button>
+      <button onclick="collapseToLayer2()">Layers only</button>
+    </div>
+
+    <div class="mindmap">
+      <div class="tree" id="tree">
+        <ul>
+          <li>
+            <span class="node root layer-infra" onclick="toggle(this.parentElement)">
+              <span class="toggle"></span>
+              LEGO-milliquad-mujoco
+              <span class="desc">Repo root — stripped to milliquad_opt/ on branch final</span>
+            </span>
+            <ul>
+              <!-- INFRA -->
+              <li>
+                <span class="node layer-infra" onclick="toggle(this.parentElement)">
+                  <span class="toggle"></span> Infrastructure
+                  <span class="badge ready">ready</span>
+                </span>
+                <ul>
+                  <li><span class="node"><code>pyproject.toml</code> <span class="desc">uv project, deps (mujoco, cma, scipy, matplotlib…)</span></span></li>
+                  <li><span class="node"><code>uv.lock</code> <span class="desc">Locked dependency versions</span></span></li>
+                  <li><span class="node"><code>.python-version</code> <span class="desc">3.12</span></span></li>
+                  <li><span class="node layer-wip"><code>CLAUDE.md</code> <span class="badge wip">stale</span> <span class="desc">Still references removed mujoco/ and sysID/</span></span></li>
+                  <li><span class="node layer-wip"><span class="badge wip">wip</span> No README.md <span class="desc">Release needs one</span></span></li>
+                </ul>
+              </li>
+
+              <!-- MILLIQUAD_OPT PACKAGE -->
+              <li>
+                <span class="node root layer-core" onclick="toggle(this.parentElement)">
+                  <span class="toggle"></span>
+                  milliquad_opt/
+                  <span class="desc">Main package — entire active codebase lives here</span>
+                </span>
+                <ul>
+
+                  <!-- CORE ENGINE -->
+                  <li>
+                    <span class="node layer-core" onclick="toggle(this.parentElement)">
+                      <span class="toggle"></span> Layer 1 — Simulation Core
+                      <span class="badge ready">ready</span>
+                    </span>
+                    <ul>
+                      <li>
+                        <span class="node layer-core">
+                          <code>simulation.py</code> <span class="badge ready">ready</span>
+                          <span class="desc">MuJoCo rollout engine. External field torques + inter-joint dipole coupling. RK4 scenes. Returns trajectory dicts or None on failure.</span>
+                        </span>
+                      </li>
+                      <li>
+                        <span class="node layer-core">
+                          <code>simulation_camera.py</code> / <code>simulation_camera_noarrow.py</code>
+                          <span class="badge wip">variant</span>
+                          <span class="desc">simulation.py + custom camera for video recording (noarrow = cleaner viz)</span>
+                        </span>
+                      </li>
+                      <li>
+                        <span class="node layer-core">
+                          <code>validate_single.py</code> / <code>validate_single_noarrow.py</code>
+                          <span class="desc">Single reference replay + optional MP4</span>
+                        </span>
+                      </li>
+                      <li>
+                        <span class="node layer-core">
+                          <code>energy_analysis.py</code>
+                          <span class="desc">Integrator energy verification (Euler vs RK4 phantom energy issue)</span>
+                        </span>
+                      </li>
+                      <li>
+                        <span class="node layer-wip">
+                          <code>simulation.py.bak</code> <span class="badge wip">cleanup</span>
+                        </span>
+                      </li>
+                    </ul>
+                  </li>
+
+                  <!-- CONFIG -->
+                  <li>
+                    <span class="node layer-config" onclick="toggle(this.parentElement)">
+                      <span class="toggle"></span> Layer 2 — Config &amp; Cost Functions
+                      <span class="badge ready">ready</span>
+                    </span>
+                    <ul>
+                      <li>
+                        <span class="node layer-config">
+                          <code>config.py</code> <span class="badge ready">canonical</span>
+                          <span class="desc">16-dim search space, SETTLE_TIME, SIM_TIMESTEP (1/2000), magnetic constants, sim_params_from_point()</span>
+                        </span>
+                      </li>
+                      <li>
+                        <span class="node layer-config" onclick="toggle(this.parentElement)">
+                          <span class="toggle"></span> Terrain configs (each: REFERENCE_DATA, calculate_cost, MJCF_PATHS, CMAES_X0)
+                        </span>
+                        <ul>
+                          <li><span class="node"><code>config_flat.py</code> <span class="badge ready">base</span> <span class="desc">15 flat conditions (scene1/2/4 + wheel × freqs)</span></span></li>
+                          <li><span class="node"><code>config_step.py</code> <span class="desc">Step terrain, spatial-gated cost (90% cutoff)</span></span></li>
+                          <li><span class="node"><code>config_rough.py</code> <span class="desc">Rough hfield, Y-jitter spawn</span></span></li>
+                          <li><span class="node"><code>config_rough_spatial.py</code> <span class="badge canonical">final rough</span> <span class="desc">Used for canonical rough run</span></span></li>
+                          <li><span class="node"><code>config_step_q60.py</code> <span class="badge canonical">final step</span> <span class="desc">Imports config_step; canonical step run</span></span></li>
+                          <li><span class="node layer-wip" onclick="toggle(this.parentElement)"><span class="toggle"></span> Time-gating variants <span class="badge wip">paper/experiment</span>
+                            <ul>
+                              <li><span class="node"><code>config_flat_tg.py</code></span></li>
+                              <li><span class="node"><code>config_flat_tg_no20.py</code></span></li>
+                              <li><span class="node"><code>config_rough_tg.py</code></span></li>
+                            </ul>
+                          </li>
+                          <li><span class="node layer-wip" onclick="toggle(this.parentElement)"><span class="toggle"></span> Spatial-gating variants <span class="badge wip">paper/experiment</span>
+                            <ul>
+                              <li><span class="node"><code>config_step_065.py</code> <span class="desc">65% spatial gate</span></span></li>
+                              <li><span class="node"><code>config_step_065_b32.py</code> <span class="desc">batch size 32</span></span></li>
+                            </ul>
+                          </li>
+                          <li><span class="node"><code>config_defaults_test.py</code> <span class="desc">Minimal test (scene2 f20 only)</span></span></li>
+                        </ul>
+                      </li>
+                      <li>
+                        <span class="node layer-config">
+                          <code>opt_archive/</code> <span class="badge archive">archive</span>
+                          <span class="desc">Old cold-start config snapshots</span>
+                        </span>
+                      </li>
+                    </ul>
+                  </li>
+
+                  <!-- OPTIMIZER -->
+                  <li>
+                    <span class="node layer-core" onclick="toggle(this.parentElement)">
+                      <span class="toggle"></span> Layer 3 — Optimization
+                      <span class="badge ready">ready</span>
+                    </span>
+                    <ul>
+                      <li>
+                        <span class="node layer-core">
+                          <code>optimizer.py</code> <span class="badge ready">ready</span>
+                          <span class="desc">CMA-ES loop. CLI: --terrain, --suffix, --scenes, --freqs, --warm-start-from, --resume-from. Writes multi_optimization_results.csv, optimization_bests.csv, cmaes_state.pkl</span>
+                        </span>
+                      </li>
+                      <li><span class="node"><code>show_bests.py</code> <span class="desc">Pretty-print optimization_bests.csv</span></span></li>
+                      <li><span class="node"><code>record_best.py</code> <span class="desc">Re-record videos from completed run</span></span></li>
+                      <li>
+                        <span class="node layer-wip">
+                          <code>friction_sensitivity.py</code> <span class="badge wip">recent</span>
+                          <span class="desc">Friction sweep analysis (Mar 2026). Not in original EXECUTION_PLAN.</span>
+                        </span>
+                      </li>
+                      <li>
+                        <span class="node layer-wip">
+                          <code>plot_friction_summary*.py</code> <span class="badge wip">recent</span>
+                        </span>
+                      </li>
+                    </ul>
+                  </li>
+
+                  <!-- ROBOTS -->
+                  <li>
+                    <span class="node layer-robot" onclick="toggle(this.parentElement)">
+                      <span class="toggle"></span> Layer 4 — Robot Models (MJCF)
+                      <span class="badge ready">ready</span>
+                    </span>
+                    <ul>
+                      <li>
+                        <span class="node layer-robot" onclick="toggle(this.parentElement)">
+                          <span class="toggle"></span> robots/quad/
+                          <span class="desc">Onshape CAD → onshape-to-robot. Shared assets for 1/2/4-leg scenes.</span>
+                        </span>
+                        <ul>
+                          <li><span class="node"><code>robot_{1,2,4}.xml</code> <span class="desc">1-, 2-, 4-leg hinge configs (FR, FL, BR, BL)</span></span></li>
+                          <li><span class="node"><code>scene_{1,2,4}_{flat,step,rough}.xml</code> <span class="desc">RK4 + energy flag baked in</span></span></li>
+                          <li><span class="node"><code>assets/</code> <span class="desc">Mesh files</span></span></li>
+                          <li><span class="node"><code>scene_*_rough.png</code> <span class="desc">Heightmap textures</span></span></li>
+                        </ul>
+                      </li>
+                      <li>
+                        <span class="node layer-robot" onclick="toggle(this.parentElement)">
+                          <span class="toggle"></span> robots/wheel/
+                          <span class="desc">Wheel failure-mode robot on step terrain</span>
+                        </span>
+                        <ul>
+                          <li><span class="node"><code>robot_wheel.xml</code></span></li>
+                          <li><span class="node"><code>scene_wheel_{flat,step,rough}.xml</code></span></li>
+                        </ul>
+                      </li>
+                      <li>
+                        <span class="node layer-wip">
+                          <code>generate_terrain_xmls.py</code> <span class="badge wip">external dep</span>
+                          <span class="desc">One-time terrain XML gen. Imports utils/terrain_mesh.py (missing on final branch)</span>
+                        </span>
+                      </li>
+                      <li><span class="node"><code>preview_terrain.py</code> <span class="desc">Terrain preview utility</span></span></li>
+                    </ul>
+                  </li>
+
+                  <!-- ANALYSIS -->
+                  <li>
+                    <span class="node layer-analysis" onclick="toggle(this.parentElement)">
+                      <span class="toggle"></span> Layer 5 — Validation &amp; Analysis
+                    </span>
+                    <ul>
+                      <li>
+                        <span class="node layer-analysis">
+                          <code>analysis/validate_params.py</code> <span class="badge ready">ready</span>
+                          <span class="desc">Jittered validation trials → NPZ + CSV (+ optional video). Main downstream input.</span>
+                        </span>
+                      </li>
+                      <li><span class="node"><code>analysis/_common.py</code> <span class="desc">Shared loaders, pitch/COT/velocity helpers</span></span></li>
+                      <li>
+                        <span class="node layer-analysis" onclick="toggle(this.parentElement)">
+                          <span class="toggle"></span> Paper figures <span class="badge ready">ready</span>
+                        </span>
+                        <ul>
+                          <li><span class="node"><code>plot_validation.py</code></span></li>
+                          <li><span class="node"><code>plot_megacomposite_nocot_065.py</code> <span class="badge canonical">main figure</span></span></li>
+                          <li><span class="node"><code>plot_cot_065.py</code> / <code>plot_cot_only*.py</code></span></li>
+                          <li><span class="node"><code>plot_trajectories.py</code></span></li>
+                          <li><span class="node"><code>dump_numbers.py</code> <span class="desc">LaTeX number extraction</span></span></li>
+                          <li><span class="node"><code>param_table*.tex</code></span></li>
+                        </ul>
+                      </li>
+                      <li>
+                        <span class="node layer-wip" onclick="toggle(this.parentElement)">
+                          <span class="toggle"></span> Sim vs experiment <span class="badge wip">external dep</span>
+                        </span>
+                        <ul>
+                          <li><span class="node"><code>plot_exp_vs_sim*.py</code> <span class="desc">Needs experimental_data/ (not in repo)</span></span></li>
+                          <li><span class="node"><code>sim_vs_real.py</code></span></li>
+                        </ul>
+                      </li>
+                      <li>
+                        <span class="node layer-wip" onclick="toggle(this.parentElement)">
+                          <span class="toggle"></span> Investigative / deep-dive <span class="badge wip">optional</span>
+                        </span>
+                        <ul>
+                          <li><span class="node"><code>analysis/investigative/</code> <span class="desc">Pitch overlays, mega plots</span></span></li>
+                          <li><span class="node"><code>analysis/l2_l4/</code> <span class="desc">H1 contact, H2 slip, H3 ripple hypotheses</span></span></li>
+                          <li><span class="node"><code>compare_params.py</code>, <code>cross_terrain_eval.py</code>, <code>eval_metrics.py</code></span></li>
+                        </ul>
+                      </li>
+                    </ul>
+                  </li>
+
+                  <!-- RESULTS -->
+                  <li>
+                    <span class="node layer-data" onclick="toggle(this.parentElement)">
+                      <span class="toggle"></span> Layer 6 — Results &amp; Artifacts
+                    </span>
+                    <ul>
+                      <li>
+                        <span class="node layer-data">
+                          <code>results/prev_params/</code> <span class="badge canonical">canonical</span>
+                          <span class="desc">Final 3 RK4 optimization runs (flat, step, rough). See REPRODUCIBILITY.md.</span>
+                        </span>
+                      </li>
+                      <li>
+                        <span class="node layer-data" onclick="toggle(this.parentElement)">
+                          <span class="toggle"></span> Mar 2026 time-gated runs
+                        </span>
+                        <ul>
+                          <li><span class="node"><code>20260303T192801_flat_tg/</code></span></li>
+                          <li><span class="node"><code>20260303T224229_rough_tg/</code></span></li>
+                          <li><span class="node"><code>20260303T151416_step_065gate/</code></span></li>
+                        </ul>
+                      </li>
+                      <li>
+                        <span class="node layer-data" onclick="toggle(this.parentElement)">
+                          <span class="toggle"></span> Friction sensitivity (Mar 2026)
+                        </span>
+                        <ul>
+                          <li><span class="node"><code>20260317T151749_friction_sensitivity/</code></span></li>
+                          <li><span class="node"><code>20260317T153408_friction_sensitivity_local/</code></span></li>
+                          <li><span class="node"><code>20260319T151716_friction_sensitivity_flat_local/</code></span></li>
+                          <li><span class="node"><code>20260319T151854_friction_sensitivity_flat_global/</code></span></li>
+                        </ul>
+                      </li>
+                      <li><span class="node"><code>results/mujoco_defaults/</code> <span class="desc">MuJoCo default-param baseline</span></span></li>
+                      <li><span class="node"><code>results/archive/</code> <span class="badge archive">archive</span> <span class="desc">Older runs + warm-start sources</span></span></li>
+                      <li><span class="node"><code>results/REPRODUCIBILITY.md</code> <span class="badge ready">ready</span></span></li>
+                      <li>
+                        <span class="node layer-data">
+                          Per-run artifacts:
+                          <span class="desc">config snapshot, multi_optimization_results.csv, optimization_bests.csv, cmaes_state.pkl, validation CSV/NPZ, rank_*.mp4</span>
+                        </span>
+                      </li>
+                    </ul>
+                  </li>
+
+                  <!-- OUTPUTS -->
+                  <li>
+                    <span class="node layer-data" onclick="toggle(this.parentElement)">
+                      <span class="toggle"></span> Layer 7 — Generated Outputs
+                      <span class="badge archive">not source</span>
+                    </span>
+                    <ul>
+                      <li><span class="node"><code>plots/</code> <span class="desc">Generated PNGs (megacomposite, validation, etc.)</span></span></li>
+                      <li><span class="node"><code>videos/</code> <span class="desc">flat/, rough/, step/, step_1/, rough_spatial/</span></span></li>
+                    </ul>
+                  </li>
+
+                  <!-- DOCS -->
+                  <li>
+                    <span class="node layer-docs" onclick="toggle(this.parentElement)">
+                      <span class="toggle"></span> Layer 8 — Internal Docs
+                    </span>
+                    <ul>
+                      <li><span class="node"><code>EXECUTION_PLAN.md</code> <span class="desc">RK4 restructure plan (mostly done)</span></span></li>
+                      <li><span class="node"><code>OPTIMIZATION_LESSONS.md</code></span></li>
+                      <li><span class="node"><code>INTEGRATOR_ENERGY_VERIFICATION.md</code></span></li>
+                      <li><span class="node"><code>RK4_OPTIMIZATION_RESULTS.md</code></span></li>
+                      <li><span class="node"><code>SPATIAL_GATING_RESULTS.md</code></span></li>
+                      <li><span class="node"><code>L2_L4_ANALYSIS.md</code></span></li>
+                      <li><span class="node"><code>DEPENDENCY_RELIANCE.md</code> <span class="desc">External deps audit</span></span></li>
+                      <li><span class="node"><code>MULTI_MACHINE.md</code></span></li>
+                      <li><span class="node"><code>FRICTION_SENSITIVITY_PLAN.md</code></span></li>
+                      <li><span class="node"><code>analysis/VALIDATE_PARAMS.md</code>, <code>PLOT_NUMBERS.md</code>, <code>NOCOT_*.md</code></span></li>
+                    </ul>
+                  </li>
+
+                </ul>
+              </li>
+
+              <!-- LEGACY (other branches) -->
+              <li>
+                <span class="node layer-wip" onclick="toggle(this.parentElement)">
+                  <span class="toggle"></span> Legacy (branch mjc_clean only — NOT on final)
+                  <span class="badge archive">removed</span>
+                </span>
+                <ul>
+                  <li><span class="node"><code>mujoco/</code> <span class="desc">Original sim_optimizer_couple.py, tune_multi_params_optimized.py</span></span></li>
+                  <li><span class="node"><code>sysID/pendulum_test/</code> <span class="desc">Chirp system ID notebooks</span></span></li>
+                  <li><span class="node"><code>utils/terrain_mesh.py</code> <span class="desc">Heightmap generation</span></span></li>
+                  <li><span class="node"><code>experimental_data/</code> <span class="desc">Real robot CSVs for sim-vs-exp plots</span></span></li>
+                </ul>
+              </li>
+
+            </ul>
+          </li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Pipeline flow -->
+    <section class="block">
+      <h2>Data Flow (release-critical path)</h2>
+      <div class="flow">
+        <span class="flow-box layer-config">config.py + config_{terrain}.py</span>
+        <span class="flow-arrow">→</span>
+        <span class="flow-box layer-core">optimizer.py (CMA-ES)</span>
+        <span class="flow-arrow">→</span>
+        <span class="flow-box layer-core">simulation.py</span>
+        <span class="flow-arrow">→</span>
+        <span class="flow-box layer-data">results/&lt;run&gt;/</span>
+        <span class="flow-arrow">→</span>
+        <span class="flow-box layer-analysis">validate_params.py</span>
+        <span class="flow-arrow">→</span>
+        <span class="flow-box layer-analysis">plot_*.py</span>
+        <span class="flow-arrow">→</span>
+        <span class="flow-box layer-data">plots/</span>
+      </div>
+    </section>
+
+    <!-- Canonical runs -->
+    <section class="block">
+      <h2>Canonical Parameter Sets (prev_params/)</h2>
+      <table>
+        <thead>
+          <tr><th>Terrain</th><th>Run dir</th><th>Config</th><th>Cost</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Flat</td>
+            <td><code>20260228T013353_rk4_flat</code></td>
+            <td><code>config_flat.py</code></td>
+            <td>0.188</td>
+          </tr>
+          <tr>
+            <td>Step</td>
+            <td><code>20260228T230022_step_q60_rk-warm</code></td>
+            <td><code>config_step_q60.py</code></td>
+            <td>0.210</td>
+          </tr>
+          <tr>
+            <td>Rough</td>
+            <td><code>20260228T202903_rough_spatial_rk4</code></td>
+            <td><code>config_rough_spatial.py</code></td>
+            <td>0.184</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- Commands -->
+    <section class="block">
+      <h2>Key Commands</h2>
+      <div class="cmd-block"># Setup
+uv sync
+
+# Optimize (from milliquad_opt/)
+cd milliquad_opt
+uv run python optimizer.py --terrain flat --suffix rk4_flat
+uv run python optimizer.py --terrain step --suffix step_q60
+uv run python optimizer.py --terrain rough --suffix rough_spatial_rk4
+
+# Validate + plot
+uv run python -m analysis.validate_params results/prev_params/20260228T013353_rk4_flat --terrain flat --csv
+uv run python analysis/plot_megacomposite_nocot_065.py
+
+# Single replay / video
+uv run python validate_single.py results/&lt;run&gt; --ref-id scene4_f30 --record
+
+# Friction sensitivity (recent)
+uv run python friction_sensitivity.py --terrain flat --mode global</div>
+    </section>
+
+    <!-- Release checklist -->
+    <section class="block">
+      <h2>Release Readiness Snapshot</h2>
+      <table>
+        <thead>
+          <tr><th>Status</th><th>Item</th></tr>
+        </thead>
+        <tbody>
+          <tr><td style="color:var(--ready)">✓ Ready</td><td>Core pipeline: config → optimizer → simulation → validate → plot</td></tr>
+          <tr><td style="color:var(--ready)">✓ Ready</td><td>Robot MJCFs with RK4 integrator</td></tr>
+          <tr><td style="color:var(--ready)">✓ Ready</td><td>Canonical params in results/prev_params/ + REPRODUCIBILITY.md</td></tr>
+          <tr><td style="color:var(--ready)">✓ Ready</td><td>Per-run snapshot pattern (config + CSVs frozen in results/)</td></tr>
+          <tr><td style="color:var(--wip)">⚠ Gap</td><td>No README.md at repo root</td></tr>
+          <tr><td style="color:var(--wip)">⚠ Gap</td><td>CLAUDE.md stale (references deleted dirs)</td></tr>
+          <tr><td style="color:var(--wip)">⚠ Gap</td><td>pyproject.toml description is placeholder</td></tr>
+          <tr><td style="color:var(--wip)">⚠ Gap</td><td>Many config variants — unclear which ship in v1.0</td></tr>
+          <tr><td style="color:var(--wip)">⚠ Gap</td><td>experimental_data/ missing — sim-vs-exp plots won't run</td></tr>
+          <tr><td style="color:var(--wip)">⚠ Gap</td><td>utils/terrain_mesh.py missing — generate_terrain_xmls.py broken</td></tr>
+          <tr><td style="color:var(--wip)">⚠ Cleanup</td><td>simulation.py.bak, opt_archive/, results/archive/ bloat</td></tr>
+          <tr><td style="color:var(--wip)">⚠ Decide</td><td>Include friction_sensitivity in release or keep experimental?</td></tr>
+          <tr><td style="color:var(--wip)">⚠ Decide</td><td>Ship l2_l4/ and investigative/ analysis or paper-only?</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- Questions -->
+    <section class="block">
+      <h2>Open Questions (need your input for release scope)</h2>
+      <ol class="questions">
+        <li><strong>Which branch is the release?</strong> You're on <code>final</code> (stripped to milliquad_opt only). Should release tag <code>final</code>, or merge back to <code>main</code> first?</li>
+        <li><strong>Which config set is "the" release?</strong> Canonical 3-terrain (<code>flat</code>, <code>step_q60</code>, <code>rough_spatial</code>) vs newer time-gated (<code>*_tg</code>) / spatial-gated (<code>step_065*</code>) variants?</li>
+        <li><strong>Include experimental_data?</strong> Sim-vs-exp plots need it. Copy into repo, submodule, or drop those scripts from release?</li>
+        <li><strong>Results bloat:</strong> Ship full <code>results/archive/</code> and all Mar 2026 runs, or only <code>prev_params/</code> + selected paper runs?</li>
+        <li><strong>Legacy on mjc_clean:</strong> Archive branch for history, or cherry-pick sysID/pendulum back into release?</li>
+        <li><strong>friction_sensitivity.py:</strong> Part of v1.0 or post-release WIP?</li>
+        <li><strong>Target audience:</strong> Reproducible paper artifact only, or general MuJoCo milliquad sim toolkit others can extend?</li>
+        <li><strong>License:</strong> Is there a LICENSE file planned? (none in repo now)</li>
+      </ol>
+    </section>
+  </main>
+
+  <script>
+    function toggle(li) {
+      if (event.target.closest('.node') !== event.currentTarget) return;
+      li.classList.toggle('collapsed');
+    }
+
+    function expandAll() {
+      document.querySelectorAll('.tree li').forEach(li => li.classList.remove('collapsed'));
+    }
+
+    function collapseAll() {
+      document.querySelectorAll('.tree li').forEach(li => {
+        if (li.querySelector('ul')) li.classList.add('collapsed');
+      });
+    }
+
+    function collapseToLayer2() {
+      collapseAll();
+      // Expand root and milliquad_opt only
+      const rootItems = document.querySelectorAll('.tree > ul > li, .tree > ul > li > ul > li:nth-child(2)');
+      rootItems.forEach(li => li.classList.remove('collapsed'));
+    }
+
+    // Start: expand top 2 levels, collapse deep branches
+    document.addEventListener('DOMContentLoaded', () => {
+      document.querySelectorAll('.tree li li li li').forEach(li => {
+        if (li.querySelector('ul')) li.classList.add('collapsed');
+      });
+    });
+  </script>
+</body>
+</html>

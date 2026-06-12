@@ -1,22 +1,13 @@
 #!/usr/bin/env python3
-"""Run a single reference condition with best params from a run dir.
+"""Run a single reference condition with best params, NO arrow overlays.
 
-Loads best params, runs one (scene, freq) condition, optionally records video
-with configurable camera. Uses simulation_camera.py for camera control.
+Identical to validate_single.py except it imports simulation_camera_noarrow,
+which omits the per-leg magnet/goal direction arrows in the viewer.
 
 Usage:
-    # Visualize interactively
-    uv run python validate_single.py results/20260303T192801_flat_tg \
+    # Visualize a single-leg flat run without arrows
+    uv run python validate_single_noarrow.py results/20260303T192801_flat_tg \
         --ref-id scene1_f10 --visualize
-
-    # Record video with custom camera
-    uv run python validate_single.py results/20260303T192801_flat_tg \
-        --ref-id scene4_f30 --record \
-        --cam-azimuth 90 --cam-elevation -20 --cam-distance 0.15
-
-    # Step terrain, specific seed
-    uv run python validate_single.py results/20260303T151416_step_065gate \
-        --terrain step_065 --ref-id scene1_f10 --record --seed 42
 """
 
 from __future__ import annotations
@@ -114,7 +105,7 @@ def main():
     point = load_best_point(args.run_dir)
     sim_params = sim_params_from_point(point)
 
-    import simulation_camera as sim_module
+    import simulation_camera_noarrow as sim_module
 
     # --- Find matching ref ---
     MJCF_PATHS = dict(config_mod.MJCF_PATHS)

@@ -1,13 +1,9 @@
 """
-MuJoCo simulation engine with configurable camera (copy of simulation.py).
+MuJoCo simulation engine with configurable camera, no visual arrow overlays.
 
-Adds camera kwargs (azimuth, elevation, distance, lookat, tracking) to
-run_simulation(). Everything else identical to simulation.py.
-
-Usage:
-    from simulation_camera import run_simulation
-    trajectory = run_simulation(params, sim_duration=5.0,
-                                cam_azimuth=90, cam_elevation=-30)
+Identical to simulation_camera.py except _update_viewer_overlays does not draw
+the per-leg magnet/goal direction arrows. Used by validate_single_noarrow.py
+for clean visualizations.
 """
 
 import time
@@ -227,27 +223,8 @@ def _apply_magnetic_forces(
 
 
 def _update_viewer_overlays(viewer, data, drive_freq, kp_mag, initial_pos, angle):
-    """Update visual overlays (arrows and text) in the viewer."""
+    """Update visual overlays (text only — arrow overlays disabled in this variant)."""
     viewer.user_scn.ngeom = 0
-
-    for i in range(4):
-        body_idx = i + 2
-        body_quat = data.xquat[body_idx]
-        body_pos = data.xpos[body_idx]
-        body_frame = R.from_quat(body_quat, scalar_first=True)
-
-        body_frame_dir = np.array([1, 0, 0]) if i in [0, 2] else np.array([-1, 0, 0])
-        world_frame_dir = np.array([0, 0, 1])
-
-        magnet_north = body_frame.as_matrix() @ body_frame_dir
-        rpy_rot = R.from_euler('y', angle, degrees=False)
-        goal_north = rpy_rot.as_matrix() @ world_frame_dir
-
-        arr_len = 0.01
-        to = body_pos + arr_len * magnet_north
-        to_goal = body_pos + arr_len * goal_north
-        add_visual_arrow(viewer.user_scn, body_pos[:3], to, rgba=(0, 1, 0, 1))
-        add_visual_arrow(viewer.user_scn, body_pos[:3], to_goal, radius=0.0005, rgba=(1, 0, 0, 0.5))
 
     text_to_display = (
         f"time: {data.time:.2f}s | "
